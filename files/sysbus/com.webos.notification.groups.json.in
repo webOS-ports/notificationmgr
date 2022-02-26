@@ -1,5 +1,5 @@
 {
-    "allowedNames" : ["com.webos.notification"],
+    "allowedNames" : [],
     "notification.operation" : ["dev"],
     "notification.management" : ["oem"]
 }
