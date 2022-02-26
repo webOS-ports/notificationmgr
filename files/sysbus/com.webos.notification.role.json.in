@@ -1,6 +1,5 @@
 {
     "exeName":"@WEBOS_INSTALL_SBINDIR@/notificationmgr",
-    "trustLevel" : ["oem"],
     "type": "regular",
     "allowedNames": ["com.webos.notification"],
     "permissions": [

@@ -1,5 +1,5 @@
 {
     "com.webos.notification": [
-         "database.operation","applicationmanager.query","time.query","settings.query","tv.settings"
+         "networking", "settings", "applications", "system", "database", "tv.settings"
     ]
 }
