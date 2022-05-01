@@ -12,7 +12,8 @@
                 "com.webos.service.tv.systemproperty",
                 "com.palm.systemservice",
                 "com.webos.applicationManager",
-                "com.webos.appinstaller"
+                "com.webos.appinstaller",
+                "com.webos.lunasend-*"
             ]
         }
     ]
