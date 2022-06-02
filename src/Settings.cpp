@@ -370,7 +370,7 @@ std::string Settings::getDefaultIcon(const std::string type)
 
 bool Settings::isPrivilegedSource(const std::string &callerId)
 {
-	if(callerId.find("com.palm.",0) == std::string::npos && callerId.find("com.webos.", 0) == std::string::npos && callerId.find("com.lge.",0) == std::string::npos)
+	if(callerId.find("com.palm.",0) == std::string::npos && callerId.find("com.webos.", 0) == std::string::npos && callerId.find("com.lge.",0) == std::string::npos && callerId.find("org.webosports.",0) == std::string::npos)
 	{
 		return false;
 	}
