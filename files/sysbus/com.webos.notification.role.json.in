@@ -10,10 +10,16 @@
                 "com.palm.bus",
                 "com.webos.settingsservice",
                 "com.palm.db",
+                "com.webos.service.eventmonitor",
                 "com.webos.service.tv.systemproperty",
                 "com.palm.systemservice",
                 "com.webos.applicationManager",
-                "com.webos.appinstaller"
+                "com.webos.appinstaller",
+                "com.webos.surfacemanager*",
+                "com.webos.app.notification*",
+                "com.webos.monitor*",
+                "com.palm.webappmanager",
+                "com.webos.lunasend-*"
             ]
         }
     ]
