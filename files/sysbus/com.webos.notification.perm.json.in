@@ -1,10 +1,9 @@
 {
     "com.webos.notification": [
+        "application.launcher",
         "application.operation",
-        "applicationmanager.query",
         "database.operation",
         "settings.query",
-        "time.query",
-        "tv.settings"
+        "time.query"
     ]
 }
