@@ -30,6 +30,10 @@ pkg_check_modules(GLIB2 REQUIRED glib-2.0)
 include_directories(${GLIB2_INCLUDE_DIRS})
 webos_add_compiler_flags(ALL ${GLIB2_CFLAGS})
 
+pkg_check_modules(GLIBMM REQUIRED glibmm-2.4)
+include_directories(${GLIBMM_INCLUDE_DIRS})
+webos_add_compiler_flags(ALL ${GLIBMM_CFLAGS})
+
 pkg_check_modules(LUNASERVICE REQUIRED luna-service2)
 include_directories(${LUNASERVICE_INCLUDE_DIRS})
 webos_add_compiler_flags(ALL ${LUNASERVICE_CFLAGS})
@@ -48,7 +52,7 @@ webos_add_compiler_flags(ALL ${Boost_CFLAGS_OTHER})
 add_definitions(-DBOOST_BIND_NO_PLACEHOLDERS)
 
 # -- check for libxml++
-pkg_check_modules(LIBXMLXX REQUIRED libxml++-2.6)
+pkg_check_modules(LIBXMLXX REQUIRED libxml++-5.0)
 webos_add_compiler_flags(ALL ${LIBXMLXX_CFLAGS})
 
 pkg_check_modules(OPENSSL REQUIRED openssl)
@@ -69,6 +73,7 @@ add_executable(notificationmgr ${SOURCES})
 
 target_link_libraries(notificationmgr
     ${GLIB2_LDFLAGS}
+    ${GLIBMM_LDFLAGS}
     ${LUNASERVICE_LDFLAGS}
     ${PBNJSON_CPP_LDFLAGS}
     ${PMLOG_LDFLAGS}

@@ -18,6 +18,7 @@
 #define __LIBXMLPP_MYPARSER_H
 
 #include <libxml++/libxml++.h>
+#include <glibmm/ustring.h>
 #include <pbnjson.hpp>
 
 class MySaxParser : public xmlpp::SaxParser
