@@ -58,7 +58,7 @@ webos_add_compiler_flags(ALL ${LIBXMLXX_CFLAGS})
 pkg_check_modules(OPENSSL REQUIRED openssl)
 webos_add_compiler_flags(ALL ${OPENSSL_CFLAGS})
 
-webos_add_compiler_flags(ALL -Wall "-std=c++11")
+webos_add_compiler_flags(ALL -Wall "-std=c++17")
 
 webos_add_linker_options(ALL --no-undefined)
 
