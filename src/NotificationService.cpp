@@ -1888,6 +1888,8 @@ bool NotificationService::cb_closeToast(LSHandle* lshandle, LSMessage *msg, void
     std::string timestamp;
 
     pbnjson::JValue request;
+    pbnjson::JValue postToastMessage;
+    pbnjson::JValue toastInfo;
     JUtil::Error error;
 
     request = JUtil::parse(LSMessageGetPayload(msg), "closeToast", &error);
@@ -1919,6 +1921,17 @@ bool NotificationService::cb_closeToast(LSHandle* lshandle, LSMessage *msg, void
         }
 
         History::instance()->deleteMessage("timestamp", timestamp);
+
+        // Deleting the history row is not enough: subscribers hold their own
+        // copy of the toast and are never told it went away, so the banner
+        // stays on screen. Post a close the same way closeAlert does.
+        postToastMessage = pbnjson::Object();
+        toastInfo = pbnjson::Object();
+        toastInfo.put("timestamp", timestamp);
+        postToastMessage.put("toastAction", "close");
+        postToastMessage.put("toastInfo", toastInfo);
+
+        NotificationService::instance()->postToastNotification(postToastMessage, false, false, errText);
     }
     else if (!sourceId.empty())
     {
@@ -1948,6 +1961,14 @@ bool NotificationService::cb_closeToast(LSHandle* lshandle, LSMessage *msg, void
         }
 
         History::instance()->deleteMessage("sourceId", sourceId);
+
+        postToastMessage = pbnjson::Object();
+        toastInfo = pbnjson::Object();
+        toastInfo.put("sourceId", sourceId);
+        postToastMessage.put("toastAction", "closeAll");
+        postToastMessage.put("toastInfo", toastInfo);
+
+        NotificationService::instance()->postToastNotification(postToastMessage, false, false, errText);
     }
 
     success = true;
