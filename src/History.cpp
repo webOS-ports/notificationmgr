@@ -56,6 +56,44 @@ History* History::instance()
 	return s_history_instance;
 }
 
+/*
+ * db8 queries used to be built by pasting values into a json string with
+ * g_strdup_printf or operator+. Everything that reaches here is caller
+ * supplied - a sourceId, a notification id, a package name - so a value
+ * carrying a quote did not end up as a value at all: it closed the string
+ * and the rest of it was read as query syntax. Build the object and let the
+ * generator do the escaping.
+ */
+pbnjson::JValue History::whereClause(const std::string& prop, const pbnjson::JValue& val, const char* op)
+{
+    pbnjson::JValue clause = pbnjson::Object();
+    clause.put("prop", prop);
+    clause.put("op", op);
+    clause.put("val", val);
+
+    pbnjson::JValue where = pbnjson::Array();
+    where.append(clause);
+    return where;
+}
+
+pbnjson::JValue History::findQuery(const pbnjson::JValue& where)
+{
+    pbnjson::JValue from = pbnjson::Object();
+    from.put("from", DB8_KIND);
+    from.put("where", where);
+
+    pbnjson::JValue query = pbnjson::Object();
+    query.put("query", from);
+    return query;
+}
+
+pbnjson::JValue History::purgeQuery(const pbnjson::JValue& where)
+{
+    pbnjson::JValue query = findQuery(where);
+    query.put("purge", true);
+    return query;
+}
+
 void History::saveMessage(pbnjson::JValue msg)
 {
 	LSErrorSafe lserror;
@@ -89,12 +127,8 @@ void History::deleteMessage(const std::string &key, const std::string& value)
 {
     LSErrorSafe lserror;
 
-    std::string query =
-        std::string( R"({"query":{"from":"com.webos.notificationhistory:1","where":[{"prop":")" ) +
-        key +
-        std::string( R"(","op":"=","val":")" ) +
-        value +
-        std::string( R"("}]},"purge":true})" );
+    std::string query = JUtil::jsonToString(
+        purgeQuery(whereClause(key, pbnjson::JValue(value))));
 
     if (LSCallOneReply(NotificationService::instance()->getHandle(),"palm://com.palm.db/del",
         query.c_str(),
@@ -108,9 +142,6 @@ bool History::selectMessage(LSHandle* lshandle, const std::string& id, LSMessage
 {
     LSErrorSafe lserror;
 
-    LSMessageRef(message);
-    replyMsg = message;
-
     pbnjson::JValue request;
     JUtil::Error error;
 
@@ -121,25 +152,29 @@ bool History::selectMessage(LSHandle* lshandle, const std::string& id, LSMessage
         return false;
     }
 
-    gchar* query = NULL;
-
+    pbnjson::JValue where;
     if(id == "all")
-    {
-        query = g_strdup_printf ("{\"query\":{\"from\":\"com.webos.notificationhistory:1\", \"where\":[{\"prop\":\"saveRemoteNotification\", \"op\":\"=\", \"val\":false}]}}");
-    }
+        where = whereClause("saveRemoteNotification", pbnjson::JValue(false));
     else
-    {
-        query = g_strdup_printf ("{\"query\":{\"from\":\"com.webos.notificationhistory:1\", \"where\":[{\"prop\":\"sourceId\", \"op\":\"=\", \"val\":\"%s\"}]}}", id.c_str());
-    }
+        where = whereClause("sourceId", pbnjson::JValue(id));
 
-    LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "[%s:%d] query = %s", __FUNCTION__, __LINE__, query);
+    std::string query = JUtil::jsonToString(findQuery(where));
+
+    LOG_DEBUG("[%s:%d] query = %s", __FUNCTION__, __LINE__, query.c_str());
+
+    /* The reply travels with the call rather than in a member: two
+     * overlapping getNotification calls used to share one slot, so the
+     * first was never answered, its reference was leaked, and the second
+     * was answered and unreferenced twice.
+     */
+    LSMessageRef(message);
     if (LSCallOneReply(lshandle, "palm://com.palm.db/find",
-                query,
-                History::cbDb8getNotiResponse,this,NULL, &lserror) == false) {
+                query.c_str(),
+                History::cbDb8getNotiResponse, message, NULL, &lserror) == false) {
         LOG_WARNING(MSGID_SAVE_MSG_FAIL, 0, "Select Message to History table call failed in %s", __PRETTY_FUNCTION__ );
+        LSMessageUnref(message);
+        return false;
     }
-    g_free (query);
-    LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "[%s:%d]", __FUNCTION__, __LINE__);
     return true;
 }
 
@@ -147,9 +182,6 @@ bool History::selectToastMessage(LSHandle* lshandle, const std::string& id, LSMe
 {
     LSErrorSafe lserror;
 
-    LSMessageRef(message);
-    replyMsg = message;
-
     pbnjson::JValue request;
     JUtil::Error error;
 
@@ -160,15 +192,17 @@ bool History::selectToastMessage(LSHandle* lshandle, const std::string& id, LSMe
         return false;
     }
 
-    pbnjson::JValue find_query = pbnjson::JObject();
-    int display_id = request["displayId"].asNumber<int>(); //NotificationService::instance()->getDisplayId();
-    pbnjson::JValue toast_request = pbnjson::JObject{{"from", DB8_KIND},
-                                               {"where", pbnjson::JArray{{{"prop", "displayId"}, {"op", "="}, {"val", display_id}}}}};
-    find_query.put("query", toast_request);
+    int display_id = request["displayId"].asNumber<int>();
+    std::string query = JUtil::jsonToString(
+        findQuery(whereClause("displayId", pbnjson::JValue(display_id))));
+
+    LSMessageRef(message);
     if (LSCallOneReply(lshandle, "palm://com.palm.db/find",
-                       JUtil::jsonToString(std::move(find_query)).c_str(),
-                       History::cbDb8getToastResponse, this, NULL, &lserror) == false) {
-                       LOG_WARNING(MSGID_SAVE_MSG_FAIL, 0, "Select Message to History table call failed in %s", __PRETTY_FUNCTION__ );
+                       query.c_str(),
+                       History::cbDb8getToastResponse, message, NULL, &lserror) == false) {
+        LOG_WARNING(MSGID_SAVE_MSG_FAIL, 0, "Select Message to History table call failed in %s", __PRETTY_FUNCTION__ );
+        LSMessageUnref(message);
+        return false;
     }
     return true;
 }
@@ -177,31 +211,26 @@ bool History::selectRemoteMessage(LSHandle* lshandle, const std::string& id, LSM
 {
     LSErrorSafe lserror;
 
-    LSMessageRef(message);
-    replyMsg = message;
-
-    gchar* query = (char *)"";
-
+    pbnjson::JValue where;
     if(id == "all")
-    {
-        query = g_strdup_printf ("{\"query\":{\"from\":\"com.webos.notificationhistory:1\", \"where\":[{\"prop\":\"saveRemoteNotification\", \"op\":\"=\", \"val\":true}]}}");
-    }
+        where = whereClause("saveRemoteNotification", pbnjson::JValue(true));
     else
-    {
-        query = g_strdup_printf ("{\"query\":{\"from\":\"com.webos.notificationhistory:1\", \"where\":[{\"prop\":\"remotePackageName\", \"op\":\"=\", \"val\":\"%s\"}]}}", id.c_str());
-    }
+        where = whereClause("remotePackageName", pbnjson::JValue(id));
 
-    LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "[%s:%d] query = %s", __FUNCTION__, __LINE__, query);
+    std::string query = JUtil::jsonToString(findQuery(where));
+
+    LOG_DEBUG("[%s:%d] query = %s", __FUNCTION__, __LINE__, query.c_str());
+
+    LSMessageRef(message);
     if (LSCallOneReply(lshandle, "palm://com.palm.db/find",
-                query,
-                History::cbDb8getRemoteNotiResponse,this,NULL, &lserror) == false) {
+                query.c_str(),
+                History::cbDb8getRemoteNotiResponse, message, NULL, &lserror) == false) {
         LOG_WARNING(MSGID_SAVE_MSG_FAIL, 0, "Select Message to History table call failed in %s", __PRETTY_FUNCTION__ );
+        LSMessageUnref(message);
+        return false;
     }
-    g_free (query);
-    LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "[%s:%d]", __FUNCTION__, __LINE__);
 
     return true;
-
 }
 
 
@@ -302,17 +331,16 @@ bool History::deleteNotiMessageFromDb(LSHandle* lsHandle, pbnjson::JValue notifi
             std::string notiId = removeNotiIdObj[index].asString();
             LOG_DEBUG("remove notiId Payload = %s", notiId.c_str());
 
-            gchar* query = g_strdup_printf ("{\"query\":{\"from\":\"com.webos.notificationhistory:1\",\"where\":[{\"prop\":\"%s\",\"op\":\"=\",\"val\":\"%s\"}]},\"purge\":true}", propertyNameInArray.c_str(), notiId.c_str());
+            std::string query = JUtil::jsonToString(
+                purgeQuery(whereClause(propertyNameInArray, pbnjson::JValue(notiId))));
 
-            LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "[%s:%d] query = %s", __FUNCTION__, __LINE__, query);
+            LOG_DEBUG("[%s:%d] query = %s", __FUNCTION__, __LINE__, query.c_str());
             if (LSCallOneReply(NotificationService::instance()->getHandle(),"palm://com.palm.db/del",
-                            query,
+                            query.c_str(),
                             History::cbDb8Response,NULL,NULL, &lserror) == false) {
                 returnValue = false;
                 LOG_WARNING(MSGID_DEL_MSG_FAIL, 0, "Delete Message from History table call failed in %s", __PRETTY_FUNCTION__ );
             }
-            g_free (query);
-            LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "[%s:%d]", __FUNCTION__, __LINE__);
         }
     }
     else if(!removeNotiNameObj.isNull())
@@ -326,17 +354,16 @@ bool History::deleteNotiMessageFromDb(LSHandle* lsHandle, pbnjson::JValue notifi
         else
         {
             LOG_DEBUG("remove notification = %s", removeNotiByName.c_str());
-            gchar* query = g_strdup_printf ("{\"query\":{\"from\":\"com.webos.notificationhistory:1\",\"where\":[{\"prop\":\"%s\",\"op\":\"=\",\"val\":\"%s\"}]},\"purge\":true}", propertyName.c_str(),removeNotiByName.c_str());
+            std::string query = JUtil::jsonToString(
+                purgeQuery(whereClause(propertyName, pbnjson::JValue(removeNotiByName))));
 
-            LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "[%s:%d] query = %s", __FUNCTION__, __LINE__, query);
+            LOG_DEBUG("[%s:%d] query = %s", __FUNCTION__, __LINE__, query.c_str());
             if (LSCallOneReply(lsHandle,"palm://com.palm.db/del",
-                            query,
+                            query.c_str(),
                             History::cbDb8Response,NULL,NULL, &lserror) == false) {
             	returnValue = false;
                 LOG_WARNING(MSGID_DEL_MSG_FAIL, 0, "Delete Message from History table call failed in %s", __PRETTY_FUNCTION__ );
             }
-            g_free (query);
-            LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "[%s:%d]", __FUNCTION__, __LINE__);
         }
     }
 
@@ -451,8 +478,10 @@ bool History::cbDb8getNotiResponse(LSHandle* lshandle, LSMessage *message, void 
     pbnjson::JValue resultArray;
     pbnjson::JValue notiInfoArray = pbnjson::Array();
 
-    History* object = (History*)user_data;
-    LSMessage* getNotiReplyMsg = object->getReplyMsg();
+    /* The message this reply belongs to travelled with the call. */
+    LSMessage* getNotiReplyMsg = static_cast<LSMessage*>(user_data);
+    if (!getNotiReplyMsg)
+        return false;
 
     JUtil::Error error;
 
@@ -572,23 +601,21 @@ Done:
     pbnjson::JValue json = pbnjson::Object();
     json.put("returnValue", success);
     json.put("notiInfo", notiInfoArray);
-    json.put("count", resultArray.arraySize());
+    json.put("count", notiInfoArray.arraySize());
 
     if(!success)
     {
         json.put("errorText", errText);
     }
 
-    std::string result = JUtil::jsonToString(std::move(json));
-    LOG_DEBUG("==== cbDb8getNotiResponse Payload ==== %s", result.c_str());
-
-    if(!LSMessageReply( lshandle, getNotiReplyMsg, result.c_str(), &lserror))
     {
-        return false;
-    }
+        std::string result = JUtil::jsonToString(std::move(json));
+        LOG_DEBUG("==== cbDb8getNotiResponse Payload ==== %s", result.c_str());
 
-    LSMessageUnref(getNotiReplyMsg);
-    return true;
+        bool replied = LSMessageReply( lshandle, getNotiReplyMsg, result.c_str(), &lserror);
+        LSMessageUnref(getNotiReplyMsg);
+        return replied;
+    }
 }
 
 bool History::cbDb8getToastResponse(LSHandle* lshandle, LSMessage *message, void *user_data)
@@ -600,8 +627,10 @@ bool History::cbDb8getToastResponse(LSHandle* lshandle, LSMessage *message, void
     pbnjson::JValue resultArray;
     pbnjson::JValue toastInfoArray = pbnjson::Array();
 
-    History* object = (History*)user_data;
-    LSMessage* getToastReplyMsg = object->getReplyMsg();
+    /* The message this reply belongs to travelled with the call. */
+    LSMessage* getToastReplyMsg = static_cast<LSMessage*>(user_data);
+    if (!getToastReplyMsg)
+        return false;
 
     JUtil::Error error;
 
@@ -707,23 +736,21 @@ Done:
     pbnjson::JValue json = pbnjson::Object();
     json.put("returnValue", success);
     json.put("toastInfo", toastInfoArray);
-    // json.put("count", resultArray.arraySize());
+    json.put("count", toastInfoArray.arraySize());
 
     if(!success)
     {
         json.put("errorText", errText);
     }
 
-    std::string result = JUtil::jsonToString( std::move(json));
-    LOG_DEBUG("==== cbDb8getToastResponse Payload ==== %s", result.c_str());
-
-    if(!LSMessageReply( lshandle, getToastReplyMsg, result.c_str(), &lserror))
     {
-        return false;
-    }
+        std::string result = JUtil::jsonToString( std::move(json));
+        LOG_DEBUG("==== cbDb8getToastResponse Payload ==== %s", result.c_str());
 
-    LSMessageUnref(getToastReplyMsg);
-    return true;
+        bool replied = LSMessageReply( lshandle, getToastReplyMsg, result.c_str(), &lserror);
+        LSMessageUnref(getToastReplyMsg);
+        return replied;
+    }
 }
 
 bool History::cbDb8getRemoteNotiResponse(LSHandle* lshandle, LSMessage *message, void *user_data)
@@ -735,8 +762,10 @@ bool History::cbDb8getRemoteNotiResponse(LSHandle* lshandle, LSMessage *message,
     pbnjson::JValue resultArray;
     pbnjson::JValue remoteNotiInfoArray = pbnjson::Array();
 
-    History* object = (History*)user_data;
-    LSMessage* getNotiReplyMsg = object->getReplyMsg();
+    /* The message this reply belongs to travelled with the call. */
+    LSMessage* getNotiReplyMsg = static_cast<LSMessage*>(user_data);
+    if (!getNotiReplyMsg)
+        return false;
 
     JUtil::Error error;
 
@@ -889,45 +918,43 @@ Done:
     pbnjson::JValue json = pbnjson::Object();
     json.put("returnValue", success);
     json.put("notiInfo", remoteNotiInfoArray);
-    json.put("count", resultArray.arraySize());
+    json.put("count", remoteNotiInfoArray.arraySize());
 
     if(!success)
     {
         json.put("errorText", errText);
     }
 
-    std::string result = JUtil::jsonToString(std::move(json));
-    LOG_DEBUG("==== cbDb8getRemoteNotiResponse Payload ==== %s", result.c_str());
-
-    if(!LSMessageReply( lshandle, getNotiReplyMsg, result.c_str(), &lserror))
     {
-        return false;
+        std::string result = JUtil::jsonToString(std::move(json));
+        LOG_DEBUG("==== cbDb8getRemoteNotiResponse Payload ==== %s", result.c_str());
+
+        bool replied = LSMessageReply( lshandle, getNotiReplyMsg, result.c_str(), &lserror);
+        LSMessageUnref(getNotiReplyMsg);
+        return replied;
     }
-
-    LSMessageUnref(getNotiReplyMsg);
-    return true;
-}
-
-LSMessage* History::getReplyMsg()
-{
-    return replyMsg;
 }
 
 bool History::purgeAllData()
 {
     LSErrorSafe lserror;
 
-    std::stringstream ss;
-    std::string purgePeriod = "9999999999";
+    static const char* const kEndOfTime = "9999999999";
 
-    gchar* query = g_strdup_printf ("{\"query\":{\"from\":\"com.webos.notificationhistory:1\",\"where\":[{\"prop\":\"isUnDeletable\",\"op\":\"=\",\"val\":false},{\"prop\":\"timestamp\",\"op\":\"<\",\"val\":\"%s\"}]},\"purge\":true}", purgePeriod.c_str());
+    pbnjson::JValue where = whereClause("isUnDeletable", pbnjson::JValue(false));
+    pbnjson::JValue olderThan = pbnjson::Object();
+    olderThan.put("prop", "timestamp");
+    olderThan.put("op", "<");
+    olderThan.put("val", kEndOfTime);
+    where.append(olderThan);
+
+    std::string query = JUtil::jsonToString(purgeQuery(where));
 
     if (LSCallOneReply(NotificationService::instance()->getHandle(),"palm://com.palm.db/del",
-                            query,
+                            query.c_str(),
                             History::cbDb8Response,NULL,NULL, &lserror) == false) {
                 LOG_WARNING(MSGID_PURGE_FAIL, 0,"PurgeAllData Db8 LS2 call failed in %s", __PRETTY_FUNCTION__ );
     }
-    g_free (query);
 
     return true;
 }
@@ -993,11 +1020,9 @@ bool History::purgeExpireData()
         return false;
     }
 
-    std::string query =
-        std::string( R"({"query":{"from":"com.webos.notificationhistory:1","where":[)" ) +
-        std::string( R"({"prop":"schedule.expire","op":"<","val":)" ) +
-        Utils::toString(currTime) +
-        std::string( R"(}]},"purge":true})" );
+    std::string query = JUtil::jsonToString(purgeQuery(
+        whereClause("schedule.expire",
+                    pbnjson::JValue(static_cast<int64_t>(currTime)), "<")));
 
     LOG_DEBUG("[purgeExpireData] query:%s", query.c_str());
 
@@ -1007,7 +1032,7 @@ bool History::purgeExpireData()
         History::cbDb8Response,NULL,NULL,&lserror) == false)
     {
         LOG_WARNING(MSGID_EXPIRE_FAIL, 1,
-            PMLOGKS("REASON", lserror.message),
+            PMLOGKS("REASON", lserror.message ? lserror.message : "unknown"),
             " ");
     }
 

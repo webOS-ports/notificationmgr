@@ -47,16 +47,19 @@ public:
     bool selectRemoteMessage(LSHandle* lshandle, const std::string& id, LSMessage *message);
     bool deleteNotiMessage(pbnjson::JValue notificationPayload);
     bool deleteRemoteNotiMessage(LSHandle* lsHandle, pbnjson::JValue notificationPayload);
-    LSMessage* getReplyMsg();
 
 protected:
     void onSystemTimeSync(bool sync);
     void onBoot(const std::string &boot);
 
 private:
-    LSMessage* replyMsg;
     bool m_expireData;
-    bool selectNotiMessageFromDb(LSHandle* lshandle, const std::string& id, LSMessage *message, const std::string& property, const std::string& isRemote);
+
+    //! Build a db8 where clause with the value escaped by the json generator.
+    static pbnjson::JValue whereClause(const std::string& prop, const pbnjson::JValue& val, const char* op = "=");
+    static pbnjson::JValue findQuery(const pbnjson::JValue& where);
+    static pbnjson::JValue purgeQuery(const pbnjson::JValue& where);
+
     bool deleteNotiMessageFromDb(LSHandle* lsHandle, pbnjson::JValue notificationPayload, const std::string& id, const std::string& idName, const std::string& propertyName, const std::string& propertyNameInArray);
 
     boost::signals2::scoped_connection m_connSystemTimeSync;
