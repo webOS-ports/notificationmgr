@@ -36,6 +36,7 @@ private:
     {
     public:
         UiComp();
+        virtual ~UiComp() {}
 
         void enable(int mask, const char *reason = NULL);
         void disable(int mask, const char *reason = NULL);
