@@ -21,6 +21,25 @@
 
 #include <openssl/sha.h>
 
+/*
+ * Both comparisons below decide whether a pincode is correct, and == on
+ * std::string stops at the first byte that differs. The time that takes is
+ * measurable, and it is measurable per byte, so an attacker who can retry can
+ * recover the code a digit at a time instead of guessing the whole of it.
+ * Compare every byte either way.
+ */
+static bool constantTimeEquals(const std::string &a, const std::string &b)
+{
+    if (a.size() != b.size())
+        return false;
+
+    unsigned char diff = 0;
+    for (size_t i = 0; i < a.size(); ++i)
+        diff |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i]);
+
+    return diff == 0;
+}
+
 static std::string bin2hex(const unsigned char *bin, size_t len)
 {
     const char hex[] = "0123456789abcdef";
@@ -36,12 +55,12 @@ static std::string bin2hex(const unsigned char *bin, size_t len)
     return res;
 }
 
-PincodeValidator::PincodeValidator(std::string code)
+PincodeValidator::PincodeValidator(const std::string& code)
     : m_code(code)
 {
 }
 
-bool PincodeValidator::check(std::string input) const
+bool PincodeValidator::check(const std::string& input) const
 {
     if (input.empty())
         return false;
@@ -67,8 +86,8 @@ bool PincodeValidator::check(std::string input) const
 
         unsigned char md[SHA256_DIGEST_LENGTH] = {0};
         SHA256((const unsigned char*)input.c_str(), input.length(), md);
-        return (bin2hex(md, SHA256_DIGEST_LENGTH) == hash);
+        return constantTimeEquals(bin2hex(md, SHA256_DIGEST_LENGTH), hash);
     }
 
-    return (m_code == input);
+    return constantTimeEquals(m_code, input);
 }

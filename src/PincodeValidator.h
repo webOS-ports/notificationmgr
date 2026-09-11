@@ -22,9 +22,9 @@
 class PincodeValidator
 {
 public:
-    PincodeValidator(std::string code);
+    explicit PincodeValidator(const std::string& code);
 
-    bool check(std::string input) const;
+    bool check(const std::string& input) const;
 
 private:
     std::string m_code;
