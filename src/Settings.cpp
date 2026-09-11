@@ -15,6 +15,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <fstream>
+#include <unistd.h>
+#include <cstdio>
 
 #include "Settings.h"
 #include "NotificationService.h"
@@ -388,7 +390,8 @@ void Settings::loadBlockedToastApps()
 		return;
 	}
 
-	for (ssize_t i = 0; i < list.arraySize(); ++i)
+	const ssize_t size = list.arraySize();
+	for (ssize_t i = 0; i < size; ++i)
 	{
 		std::string appId = list[i].asString();
 		if (!appId.empty())
@@ -409,15 +412,75 @@ void Settings::saveBlockedToastApps()
 	std::string serialized = pbnjson::JGenerator::serialize(list,
 			pbnjson::JSchemaFragment("{}"));
 
-	std::ofstream out(s_blockedToastAppsFile, std::ios::trunc);
-	if (!out)
+	/*
+	 * Write beside the file and rename over it. Truncating in place means
+	 * that a device losing power between the truncate and the flush comes
+	 * back up with an empty or half-written list, and this is a file read
+	 * once at startup - a person's choices would be silently gone. rename()
+	 * within a directory is atomic, so a reader sees either the old list or
+	 * the new one.
+	 */
+	const std::string finalPath(s_blockedToastAppsFile);
+	const std::string tmpPath = finalPath + ".tmp";
+
 	{
-		LOG_WARNING(MSGID_SETTINGS_FILE_LOAD_FAILED, 0,
-			"Cannot write %s in %s", s_blockedToastAppsFile, __PRETTY_FUNCTION__);
-		return;
+		std::ofstream out(tmpPath.c_str(), std::ios::trunc | std::ios::binary);
+		if (!out)
+		{
+			LOG_WARNING(MSGID_SETTINGS_FILE_SAVE_FAILED, 0,
+				"Cannot write %s in %s", tmpPath.c_str(), __PRETTY_FUNCTION__);
+			return;
+		}
+
+		out << serialized;
+		out.flush();
+
+		if (!out)
+		{
+			LOG_WARNING(MSGID_SETTINGS_FILE_SAVE_FAILED, 0,
+				"Failed writing %s in %s", tmpPath.c_str(), __PRETTY_FUNCTION__);
+			out.close();
+			::unlink(tmpPath.c_str());
+			return;
+		}
 	}
 
-	out << serialized;
+	if (::rename(tmpPath.c_str(), finalPath.c_str()) != 0)
+	{
+		LOG_WARNING(MSGID_SETTINGS_FILE_SAVE_FAILED, 0,
+			"Cannot replace %s in %s", finalPath.c_str(), __PRETTY_FUNCTION__);
+		::unlink(tmpPath.c_str());
+	}
+}
+
+/*
+ * An id belongs to a namespace when it starts with it - and starts with the
+ * whole of it, up to a boundary, so that "com.webos.app.foo" is inside
+ * "com.webos." and "evil.com.webos.app.foo" is not. Every check below used
+ * find() != npos, which answers "does this appear anywhere", and that is not
+ * the same question.
+ */
+bool Settings::idHasPrefix(const std::string& id, const std::string& prefix)
+{
+	if (prefix.empty() || id.size() < prefix.size())
+		return false;
+
+	if (id.compare(0, prefix.size(), prefix) != 0)
+		return false;
+
+	/* A prefix written with its trailing dot ("com.webos.") has already
+	 * consumed the boundary. One written without ("com.webos.app.foo") has
+	 * to be the whole id, or be followed by a separator - otherwise
+	 * "com.webos.app.foobar" would pass as "com.webos.app.foo".
+	 */
+	if (prefix[prefix.size() - 1] == '.')
+		return true;
+
+	if (id.size() == prefix.size())
+		return true;
+
+	const char next = id[prefix.size()];
+	return next == '.' || next == '-' || next == ' ';
 }
 
 bool Settings::isPartOfAggregators(const std::string& sId)
