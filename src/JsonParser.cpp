@@ -110,9 +110,11 @@ pbnjson::JValue JsonParser::createActionInfo(pbnjson::JValue src)
         return action;
 
     std::string uri = src["uri"].asString();
-    if (Utils::isValidURI(uri))
+    std::string::size_type found = uri.find_last_of("/");
+    if (Utils::isValidURI(uri) && found != std::string::npos)
     {
-        unsigned found = uri.find_last_of("/");
+        /* found was an unsigned, so a uri with no '/' at all truncated npos
+         * to 0xffffffff and substr(0, found + 1) wrapped to substr(0, 0). */
         action.put("serviceURI", uri.substr(0, found + 1));
         action.put("serviceMethod", uri.substr(found + 1));
         if (!src["params"].isNull())

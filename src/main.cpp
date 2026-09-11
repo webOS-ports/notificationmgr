@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <glib.h>
+#include <glib-unix.h>
 #include <errno.h>
 
 #include "Logging.h"
@@ -26,10 +27,19 @@
 
 static GMainLoop * s_main_loop = NULL;
 
-void
-term_handler(int signal)
+/*
+ * Runs from the main loop, not from the signal handler. The previous version
+ * called g_main_loop_quit() straight out of a SIGTERM handler; nothing in glib
+ * is async-signal-safe, so a signal arriving while the loop held its own lock
+ * deadlocked or corrupted it. g_unix_signal_add() catches the signal and
+ * dispatches this as an ordinary source.
+ */
+static gboolean
+term_handler(gpointer user_data)
 {
+    LOG_DEBUG("shutting down on signal");
     g_main_loop_quit(s_main_loop);
+    return G_SOURCE_REMOVE;
 }
 
 int
@@ -37,11 +47,24 @@ main(int argc, char **argv)
 {
     LOG_DEBUG("entering %s in %s", __func__, __FILE__ );
 
-    signal(SIGTERM, term_handler);
+    /* A bus peer going away while a reply is being written would otherwise
+     * take the daemon with it. */
+    signal(SIGPIPE, SIG_IGN);
 
     s_main_loop = g_main_loop_new(NULL, FALSE);
 
-    NotificationService::instance()->attach(s_main_loop);
+    g_unix_signal_add(SIGTERM, term_handler, NULL);
+    g_unix_signal_add(SIGINT, term_handler, NULL);
+
+    /* Registering on the bus is the whole job. Carrying on without it left a
+     * process sitting in a main loop with nothing attached to it, which
+     * systemd has no way to tell apart from a working service. */
+    if (!NotificationService::instance()->attach(s_main_loop))
+    {
+        LOG_ERROR(MSGID_SERVICE_REG_ERR, 0, "Could not attach to the bus, giving up");
+        g_main_loop_unref(s_main_loop);
+        return EXIT_FAILURE;
+    }
 
     g_main_loop_run(s_main_loop);
 

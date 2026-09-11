@@ -17,9 +17,13 @@
 #include "Utils.h"
 #include <sys/stat.h>
 #include <sys/statfs.h>
+#include <new>
 #include <Logging.h>
 
 namespace Utils {
+
+//! Upper bound for readFile(), which only ever reads small json files.
+static const long kMaxReadFileSize = 4 * 1024 * 1024;
 
 bool verifyFileExist(const char *pathAndFile) {
 
@@ -27,7 +31,6 @@ bool verifyFileExist(const char *pathAndFile) {
 		return false;
 	}
 
-	std::string fName(pathAndFile);
 	struct stat buf;
 
 	if(-1 == ::stat(pathAndFile, &buf)) {
@@ -46,38 +49,61 @@ char* readFile(const char* filePath)
 {
 	if(!filePath)
 		return 0;
+
 	FILE* fp = fopen(filePath, "r");
-	
 	if(!fp)
 		return 0;
-	
-	fseek(fp, 0L, SEEK_END);
+
+	if(fseek(fp, 0L, SEEK_END) != 0)
+	{
+		fclose(fp);
+		return 0;
+	}
+
 	long sz = ftell(fp);
-	fseek(fp, 0L, SEEK_SET);
-	
+	rewind(fp);
+
 	if(sz <= 0)
 	{
 		fclose(fp);
 		return 0;
 	}
 
-        char* ptr = new char[sz];
-	if( !ptr )
+	/* Every caller hands the result straight to the json parser, and the
+	 * things read here are a config file and a preferences file. A file
+	 * larger than this is not one of those, and reading it would only mean
+	 * allocating whatever someone put on the filesystem.
+	 */
+	if(sz > kMaxReadFileSize)
+	{
+		LOG_WARNING(MSGID_READ_FILE_TOO_LARGE, 1,
+			PMLOGKS("PATH", filePath),
+			"File is larger than %ld bytes in %s", kMaxReadFileSize, __PRETTY_FUNCTION__);
+		fclose(fp);
+		return 0;
+	}
+
+	/* One byte more than the file: the terminator goes after the content
+	 * rather than on top of its last byte, which is what this used to do -
+	 * every file read here silently lost its final character.
+	 */
+	char* ptr = new (std::nothrow) char[sz + 1];
+	if(!ptr)
 	{
 		fclose(fp);
 		return 0;
 	}
-	
-	size_t result = fread(ptr, sz, 1, fp);
-        ptr[sz - 1] = 0;
-	if( result != 1 )
+
+	size_t result = fread(ptr, 1, static_cast<size_t>(sz), fp);
+	fclose(fp);
+
+	if(result != static_cast<size_t>(sz))
 	{
 		delete[] ptr;
-		fclose(fp);
 		return 0;
 	}
-	fclose(fp);
-	
+
+	ptr[sz] = 0;
 	return ptr;
 }
 

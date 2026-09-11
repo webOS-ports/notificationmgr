@@ -100,7 +100,12 @@ private:
         TrackerFinder(T *_p) : m_p(_p) {}
         bool operator()(SingletonNS::Tracker *p)
         {
-            TrackerImpl<T> *pImpl = static_cast< TrackerImpl<T>* >(p);
+            /* The list holds trackers for every singleton type, so this has
+             * to ask whether the entry really is a TrackerImpl<T> rather
+             * than assert it - a static_cast here reinterprets an unrelated
+             * type and compares whatever happens to sit at that offset.
+             */
+            TrackerImpl<T> *pImpl = dynamic_cast< TrackerImpl<T>* >(p);
             if (!pImpl) return false;
             return (pImpl->m_p == m_p);
         }
@@ -122,14 +127,11 @@ private:
     static void track()
     {
         SingletonNS::Tracker* pTracker = new TrackerImpl<TYPE>(Singleton<TYPE>::_instance);
-        if (pTracker)
+        SingletonNS::_list.push_back(pTracker);
+        if (!SingletonNS::_atexit_registered)
         {
-            SingletonNS::_list.push_back(pTracker);
-            if (!SingletonNS::_atexit_registered)
-            {
-                SingletonNS::_atexit_registered = true;
-                atexit( SingletonNS::destroyAll );
-            }
+            SingletonNS::_atexit_registered = true;
+            atexit( SingletonNS::destroyAll );
         }
     }
 
@@ -140,8 +142,13 @@ private:
             SingletonNS::_list.end(), TrackerFinder<TYPE>(Singleton<TYPE>::_instance) );
         if (it != SingletonNS::_list.end())
         {
+            /* Take the pointer before erasing: erase() invalidates the
+             * iterator, so dereferencing it afterwards - which is what this
+             * used to do - reads freed list storage.
+             */
+            SingletonNS::Tracker* pTracker = *it;
             SingletonNS::_list.erase(it);
-            delete *it;
+            delete pTracker;
         }
     }
 
