@@ -1038,7 +1038,7 @@ bool NotificationService::cb_createAlert(LSHandle* lshandle, LSMessage *msg, voi
     bool ignoreDisable = false;
     int displayId = 0;
 
-	unsigned found = 0;
+	std::string::size_type found = 0;
 	JUtil::Error error;
 
 	std::vector<std::string> uriList;
@@ -1250,6 +1250,11 @@ bool NotificationService::cb_createAlert(LSHandle* lshandle, LSMessage *msg, voi
 
 					onclickString = buttonArray[index][clickSchemaString].asString();
 					found = onclickString.find_last_of("/");
+					if (found == std::string::npos)
+					{
+						LOG_WARNING(MSGID_CA_SERVICEURI_INVALID, 0, "Invalid ServiceURI is given in %s", __PRETTY_FUNCTION__);
+						return alertRespondWithError(msg, sourceId, alertId, title, message, "Invalid Service Uri in the onclick");
+					}
 
 					action.put("serviceURI", onclickString.substr(0, found+1));
 					action.put("serviceMethod", onclickString.substr(found+1));
@@ -2488,7 +2493,7 @@ bool NotificationService::cb_removeNotification(LSHandle* lshandle, LSMessage *m
                         goto Done;
                     }
                     LOG_DEBUG("timestamp = %s", timestamp.c_str());
-                    LOG_DEBUG("notiIdArray = %d, %s", index, notiIdArray[index].asString().c_str());
+                    LOG_DEBUG("notiIdArray = %zd, %s", index, notiIdArray[index].asString().c_str());
                     removeNotiInfo.put(index, notiIdArray[index]);
                 }
                 else
@@ -3062,9 +3067,21 @@ NotificationService::NotiMsgItem::NotiMsgItem(pbnjson::JValue payload, bool remo
 //Parsing XML
 bool NotificationService::parseDoc(const char *docname)
 {
+    if (!docname)
+        return false;
+
     // Set the global C and C++ locale to the user-configured locale,
     // so we can use std::cout with UTF-8, via Glib::ustring, without exceptions.
-    std::locale::global(std::locale(""));
+    // std::locale("") throws when the environment names a locale the image
+    // does not carry, which on a minimal rootfs is the normal case.
+    try
+    {
+        std::locale::global(std::locale(""));
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_DEBUG("Keeping the C locale: %s", ex.what());
+    }
 
     std::string filepath(docname);
 
@@ -3098,9 +3115,9 @@ bool NotificationService::parseDoc(const char *docname)
         xmlpath =  Schedule::instance()->Period["CanvasPath"].asString() + "/" + Schedule::instance()->CanvasName;
     */
 
-    int lastOccurrence = filepath.find_last_of("/");
+    std::string::size_type lastOccurrence = filepath.find_last_of("/");
 
-    if (lastOccurrence > -1)
+    if (lastOccurrence != std::string::npos)
         canvasPath = filepath.substr(0, lastOccurrence);
     else
     {
