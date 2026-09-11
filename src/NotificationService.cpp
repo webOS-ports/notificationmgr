@@ -87,7 +87,7 @@ static LSMethod s_methods[] =
 using namespace std::placeholders;
 
 NotificationService::NotificationService()
-    : UI_ENABLED(false), BLOCK_ALERT_NOTIFICATION(false), BLOCK_TOAST_NOTIFICATION(false)
+    : m_pincode_message(0), UI_ENABLED(false), BLOCK_ALERT_NOTIFICATION(false), BLOCK_TOAST_NOTIFICATION(false)
 {
     m_service = 0;
     if (UiStatus::instance().alert())
