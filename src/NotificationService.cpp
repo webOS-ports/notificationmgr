@@ -2562,8 +2562,6 @@ bool NotificationService::cb_getNotificationInfo(LSHandle* lshandle, LSMessage *
 
     JUtil::Error error;
 
-    History* getReq = NULL;
-
     std::string caller = LSUtils::getCallerId(msg);
     if(caller.empty())
     {
@@ -2585,7 +2583,6 @@ bool NotificationService::cb_getNotificationInfo(LSHandle* lshandle, LSMessage *
 
     if(!request["all"].isNull())
     {
-        getReq = new History();
         all = request["all"].asBool();
         postNotiInfoMessage.put("all", all);
 
@@ -2617,13 +2614,10 @@ bool NotificationService::cb_getNotificationInfo(LSHandle* lshandle, LSMessage *
 
                 postNotiInfoMessage.put("sourceId", sourceId);
 
-                if(getReq)
+                success = History::instance()->selectMessage(lshandle, sourceId, msg);
+                if (!success)
                 {
-                    success = getReq->selectMessage(lshandle, sourceId, msg);
-                    if (!success)
-                    {
-                        errText = "can't get the notification info from db";
-                    }
+                    errText = "can't get the notification info from db";
                 }
             }
         }
@@ -2638,13 +2632,10 @@ bool NotificationService::cb_getNotificationInfo(LSHandle* lshandle, LSMessage *
                 goto Done;
             }
 
-            if(getReq)
+            success = History::instance()->selectMessage(lshandle, "all", msg);
+            if (!success)
             {
-                success = getReq->selectMessage(lshandle, "all", msg);
-                if (!success)
-                {
-                    errText = "can't get the notification info from db";
-                }
+                errText = "can't get the notification info from db";
             }
         }
     }
@@ -2683,17 +2674,14 @@ bool NotificationService::cb_getToastList(LSHandle* lshandle, LSMessage *msg, vo
     std::string errText;
     std::string timestamp;
 
-    bool all = false;
     bool privilegedSource = false;
 
-    int displayId;
+    int displayId = 0;
 
     pbnjson::JValue request;
     pbnjson::JValue postToastInfoMessage;
 
     JUtil::Error error;
-
-    History* getReq = NULL;
 
     std::string caller = LSUtils::getCallerId(msg);
     if(caller.empty())
@@ -2714,9 +2702,13 @@ bool NotificationService::cb_getToastList(LSHandle* lshandle, LSMessage *msg, vo
 
     postToastInfoMessage = pbnjson::Object();
 
-    getReq = new History();
-
     displayId = request["displayId"].asNumber<int>();
+    if (!isValidDisplayId(displayId))
+    {
+        LOG_WARNING(MSGID_CT_DISPLAYID_INVALID, 0, "displayId %d is out of range in %s", displayId, __PRETTY_FUNCTION__);
+        errText = "Invalid displayId";
+        goto Done;
+    }
     postToastInfoMessage.put("displayId", displayId);
 
     if(Settings::instance()->isPrivilegedSource(caller))
@@ -2733,13 +2725,10 @@ bool NotificationService::cb_getToastList(LSHandle* lshandle, LSMessage *msg, vo
 
     postToastInfoMessage.put("sourceId", sourceId);
 
-    if(getReq)
+    success = History::instance()->selectToastMessage(lshandle, sourceId, msg);
+    if (!success)
     {
-        success = getReq->selectToastMessage(lshandle, sourceId, msg);
-        if (!success)
-        {
-            errText = "can't get the notification info from db";
-        }
+        errText = "can't get the notification info from db";
     }
 Done:
     pbnjson::JValue json = pbnjson::Object();
