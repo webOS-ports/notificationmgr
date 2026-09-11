@@ -161,7 +161,7 @@ bool Settings::cbSystemSettingsStatusNotification(LSHandle* lshandle, LSMessage 
 			Settings::cb_getSystemSettingForOption, NULL, NULL, &lserror) == false)
 		{
 			LOG_WARNING(MSGID_SETTINGS_GETSYSTEMSETTINGS_OPTION_FAILED, 1,
-				PMLOGKS("ERROR", lserror.message), " ");
+				PMLOGKS("ERROR", lserror.message ? lserror.message : "unknown"), " ");
 		}
 	}
 
@@ -420,22 +420,15 @@ void Settings::saveBlockedToastApps()
 	out << serialized;
 }
 
-bool Settings::isPartOfAggregators(std::string sId)
+bool Settings::isPartOfAggregators(const std::string& sId)
 {
-	bool isExist = false;
-
-	for(std::vector<std::string>::iterator it = m_notificationAggregator.begin(); it != m_notificationAggregator.end(); ++it)
+	for(std::vector<std::string>::const_iterator it = m_notificationAggregator.begin(); it != m_notificationAggregator.end(); ++it)
 	{
-		std::string item = (*it);
-		if(sId.find(item,0) == std::string::npos) {
-			isExist = false;
-		}
-		else {
+		if(idHasPrefix(sId, *it))
 			return true;
-		}
 	}
 
-	return isExist;
+	return false;
 }
 
 int Settings::getRetentionPeriod()
@@ -443,7 +436,7 @@ int Settings::getRetentionPeriod()
 	return m_retentionPeriod;
 }
 
-std::string Settings::getDefaultIcon(const std::string type)
+std::string Settings::getDefaultIcon(const std::string& type)
 {
 	if(type.empty())
 		return s_defaultToastIcon;
@@ -460,9 +453,18 @@ std::string Settings::getDefaultIcon(const std::string type)
 
 bool Settings::isPrivilegedSource(const std::string &callerId)
 {
-	if(callerId.find("com.palm.",0) == std::string::npos && callerId.find("com.webos.", 0) == std::string::npos && callerId.find("com.lge.",0) == std::string::npos && callerId.find("org.webosports.",0) == std::string::npos)
+	static const char* const privilegedPrefixes[] = {
+		"com.palm.",
+		"com.webos.",
+		"com.lge.",
+		"org.webosports.",
+	};
+
+	for (size_t i = 0; i < sizeof(privilegedPrefixes) / sizeof(privilegedPrefixes[0]); ++i)
 	{
-		return false;
+		if (idHasPrefix(callerId, privilegedPrefixes[i]))
+			return true;
 	}
-	return true;
+
+	return false;
 }

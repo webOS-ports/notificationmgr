@@ -261,8 +261,8 @@ bool NotificationService::cb_getNotification(LSHandle* lshandle, LSMessage *msg,
     checkCaller = Utils::extractSourceIdFromCaller(caller);
     LOG_DEBUG("cb_getNotification Caller = %s", checkCaller.c_str());
 
-    if ((std::string(checkCaller).find(PRIVILEGED_SYSTEM_UI_SOURCE) != std::string::npos)
-       ||(std::string(checkCaller).find(PRIVILEGED_SYSTEM_UI_NOTI) != std::string::npos))
+    if (Settings::idHasPrefix(checkCaller, PRIVILEGED_SYSTEM_UI_SOURCE)
+       || Settings::idHasPrefix(checkCaller, PRIVILEGED_SYSTEM_UI_NOTI))
     {
         subscribeUI = true;
         if(LSMessageIsSubscription(msg))
@@ -316,8 +316,8 @@ bool NotificationService::cb_getToastCount(LSHandle* lshandle, LSMessage *msg, v
     pbnjson::JValue request = pbnjson::Object();
     request = JUtil::parse(LSMessageGetPayload(msg), "", nullptr);
 
-    if ((std::string(checkCaller).find(PRIVILEGED_SYSTEM_UI_SOURCE) != std::string::npos )
-       ||(std::string(checkCaller).find(PRIVILEGED_SYSTEM_UI_NOTI) != std::string::npos))
+    if (Settings::idHasPrefix(checkCaller, PRIVILEGED_SYSTEM_UI_SOURCE)
+       || Settings::idHasPrefix(checkCaller, PRIVILEGED_SYSTEM_UI_NOTI))
     {
         subscribeUI = true;
 
@@ -525,7 +525,13 @@ bool NotificationService::cb_createToast(LSHandle* lshandle, LSMessage *msg, voi
     // SourceId and Caller should match for non-privileged apps
     if (!privilegedSource)
     {
-        if (std::string(caller).find(sourceId, 0) == std::string::npos)
+        /* The caller is its own appId, optionally with an instance suffix
+         * ("com.webos.app.foo-1234"), so the sourceId has to be the front of
+         * it. This used to be find() != npos: a sourceId appearing anywhere
+         * in the caller passed, so an application could name any sourceId
+         * that happened to be a substring of its own id - "com" among them.
+         */
+        if (!Settings::idHasPrefix(caller, sourceId))
         {
             LOG_WARNING(MSGID_CT_SOURCEID_INVALID, 0, "Source ID is invalid in %s", __PRETTY_FUNCTION__);
             errText = "Invalid source id specified";
@@ -2554,8 +2560,8 @@ bool NotificationService::cb_removeAllNotification(LSHandle* lshandle, LSMessage
 
     // Check for Caller Id
     checkCaller = Utils::extractSourceIdFromCaller(caller);
-    LOG_DEBUG("cb_removeAllNotification Caller = %s, %zu", checkCaller.c_str(), std::string(checkCaller).find(PRIVILEGED_SYSTEM_UI_SOURCE));
-    if (std::string(checkCaller).find(PRIVILEGED_SYSTEM_UI_SOURCE) == std::string::npos)
+    LOG_DEBUG("cb_removeAllNotification Caller = %s", checkCaller.c_str());
+    if (!Settings::idHasPrefix(checkCaller, PRIVILEGED_SYSTEM_UI_SOURCE))
     {
         LOG_WARNING(MSGID_CA_PERMISSION_DENY, 0, "Caller is neither privileged source nor part of aggregators in %s", __PRETTY_FUNCTION__);
         success = false;
@@ -3162,7 +3168,13 @@ bool NotificationService::cb_setToastStatus(LSHandle *lshandle, LSMessage *msg, 
     else
     {
         toastId = json["toastId"].asString();
-        if(toastId.find("com.palm.",0) == std::string::npos && toastId.find("com.webos.", 0) == std::string::npos && toastId.find("com.lge.",0) == std::string::npos)
+        /* A toastId is sourceId + "-" + timestamp, so this is asking whether
+         * the sourceId part sits in a namespace this service issues ids for.
+         * It was spelled out again here, with find() rather than a prefix
+         * test and without org.webosports - so a LuneOS application's own
+         * toast could never be marked read.
+         */
+        if(!Settings::instance()->isPrivilegedSource(toastId))
         {
             LOG_DEBUG("Invalid toastId");
             json.put("errorText", "Invalid toastId");

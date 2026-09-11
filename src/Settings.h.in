@@ -46,7 +46,12 @@ public:
 	bool enableToastNotification();
 	bool enableToastNotificationForApp(const std::string& appId);
 
-	bool isPartOfAggregators(std::string sId);
+	bool isPartOfAggregators(const std::string& sId);
+
+	/*! Does id sit inside the namespace prefix, at a name boundary?
+	 * "com.webos." contains "com.webos.app.foo" but not "evil.com.webos.x".
+	 */
+	static bool idHasPrefix(const std::string& id, const std::string& prefix);
 
 	bool isToastBlockedForApp(const std::string& appId) const;
 	const std::set<std::string>& blockedToastApps() const;
@@ -56,7 +61,7 @@ public:
 	void saveBlockedToastApps();
 
 	int getRetentionPeriod();
-	std::string getDefaultIcon(const std::string type);
+	std::string getDefaultIcon(const std::string& type);
 
 	bool isPrivilegedSource(const std::string& callerId);
 
