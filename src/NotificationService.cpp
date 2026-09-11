@@ -850,8 +850,28 @@ bool NotificationService::alertRespond(LSMessage* msg, const std::string& source
 	return LSMessageRespond(msg, result.c_str(), NULL);
 }
 
+/*
+ * createAlert hands this to the isCallAllowed round trip, one hop per uri in
+ * the alert. It owns the reference on the message it will eventually answer:
+ * the ref used to be taken by hand in cb_createAlert and released nowhere at
+ * all, so every alert carrying an onclick or onclose leaked a bus message for
+ * the life of the daemon.
+ */
 struct AlertData
 {
+	explicit AlertData(LSMessage *msg) : message(msg)
+	{
+		if (message) LSMessageRef(message);
+	}
+
+	~AlertData()
+	{
+		if (message) LSMessageUnref(message);
+	}
+
+	AlertData(const AlertData&) = delete;
+	AlertData& operator=(const AlertData&) = delete;
+
 	LSMessage* message;
 	std::string sourceId;
 	std::string alertId;
@@ -862,6 +882,19 @@ struct AlertData
 	std::string uriVerified;
 	std::string serviceNameCreateAlert;
 };
+
+/*
+ * The uri comes out of the caller's payload, so it cannot be pasted into a
+ * json string - a uri containing a quote rewrites the request that decides
+ * whether the caller may invoke it.
+ */
+static std::string isCallAllowedParams(const std::string& uri, const std::string& requester)
+{
+	pbnjson::JValue params = pbnjson::Object();
+	params.put("uri", uri);
+	params.put("requester", requester);
+	return JUtil::jsonToString(params);
+}
 
 bool NotificationService::alertRespond(bool success, const std::string &errorText,
         LSMessageWrapper msg, const std::string& sourceId,
@@ -1233,12 +1266,10 @@ bool NotificationService::cb_createAlert(LSHandle* lshandle, LSMessage *msg, voi
 		return alertRespond(msg, sourceId, alertId, title, message, postCreateAlert);
 	}
 
-	LSMessageRef(msg);
 	std::string uri = uriList.back();
 	uriList.pop_back();
 
-	AlertData *data = new AlertData();
-	data->message = msg;
+	AlertData *data = new AlertData(msg);
 	data->sourceId = sourceId;
 	data->alertId = alertId;
 	data->alertTitle = title;
@@ -1250,11 +1281,12 @@ bool NotificationService::cb_createAlert(LSHandle* lshandle, LSMessage *msg, voi
             data->serviceNameCreateAlert = serviceName;
 	data->postCreateAlert = std::move(postCreateAlert);
 
-	std::string params = "{\"uri\": \"" + uri + "\", \"requester\": \"" + data->serviceNameCreateAlert + "\"}";
-        if(!LSCall(NotificationService::instance()->getHandle(), "palm://com.palm.bus/isCallAllowed", params.c_str(), cb_createAlertIsAllowed, data, NULL, &lserror) && lserror.message)
+	std::string params = isCallAllowedParams(uri, data->serviceNameCreateAlert);
+        if(!LSCall(NotificationService::instance()->getHandle(), "palm://com.palm.bus/isCallAllowed", params.c_str(), cb_createAlertIsAllowed, data, NULL, &lserror))
         {
+                std::string reason = lserror.message ? lserror.message : "unknown";
                 delete data;
-                return alertRespondWithError(msg, sourceId, alertId, title, message, std::string("Call failed - ") + lserror.message);
+                return alertRespondWithError(msg, sourceId, alertId, title, message, std::string("Call failed - ") + reason);
         }
 	return true;
 }
@@ -1262,11 +1294,16 @@ bool NotificationService::cb_createAlert(LSHandle* lshandle, LSMessage *msg, voi
 bool NotificationService::cb_createAlertIsAllowed(LSHandle* lshandle, LSMessage *msg, void *user_data)
 {
         AlertData *data = static_cast<AlertData*>(user_data);
+        if (!data)
+                return false;
+
         LSErrorSafe lserror;
         JUtil::Error error;
         pbnjson::JValue request = JUtil::parse(LSMessageGetPayload(msg), "", &error);
 
-        LSMessage* message = data->message;
+        /* A reference of our own, because every branch below deletes data -
+         * which drops its reference - before answering through this. */
+        LSMessageWrapper message(data->message);
         std::string sourceId = data->sourceId;
         std::string alertId = data->alertId;
         std::string alertTitle = data->alertTitle;
@@ -1306,11 +1343,12 @@ bool NotificationService::cb_createAlertIsAllowed(LSHandle* lshandle, LSMessage 
 
         data->uriVerified = uri;
 
-        std::string params = "{\"uri\": \"" + uri + "\", \"requester\": \"" + data->serviceNameCreateAlert + "\"}";
-        if(!LSCall(NotificationService::instance()->getHandle(), "palm://com.palm.bus/isCallAllowed", params.c_str(), cb_createAlertIsAllowed, data, NULL, &lserror) && lserror.message)
+        std::string params = isCallAllowedParams(uri, data->serviceNameCreateAlert);
+        if(!LSCall(NotificationService::instance()->getHandle(), "palm://com.palm.bus/isCallAllowed", params.c_str(), cb_createAlertIsAllowed, data, NULL, &lserror))
         {
+                std::string reason = lserror.message ? lserror.message : "unknown";
                 delete data;
-                return alertRespondWithError(message, sourceId, alertId, alertTitle, alertMessage, std::string("Call failed - ") + lserror.message);
+                return alertRespondWithError(message, sourceId, alertId, alertTitle, alertMessage, std::string("Call failed - ") + reason);
         }
 
         return true;
