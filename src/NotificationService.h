@@ -161,6 +161,9 @@ private:
 
     static toastCount toastCountVector[NUM_DISPLAYS];
 
+    //! Is this a display this device has, and so an index into toastCountVector?
+    static bool isValidDisplayId(int displayId);
+
 protected:
     //LSMethod* get_private_methods() const;
     //LSMethod* get_public_methods() const;

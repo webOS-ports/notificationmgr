@@ -173,6 +173,19 @@ const char* NotificationService::getServiceName(LSMessage *msg)
 	return caller;
 }
 
+/*
+ * toastCountVector has one entry per display and the displayId that indexes
+ * it arrives in the request payload. createToast, removeAllNotification and
+ * setToastStatus all used it after nothing more than "displayId >= 0", so any
+ * caller able to reach those methods could pick the offset of an int to
+ * increment or zero. getToastCount was already checking; the check belongs in
+ * one place that all four use.
+ */
+bool NotificationService::isValidDisplayId(int displayId)
+{
+    return displayId >= 0 && displayId < NUM_DISPLAYS;
+}
+
 void NotificationService::pushNotiMsgQueue(pbnjson::JValue payload, bool remove, bool removeAll) {
     LOG_WARNING("notificationmgr", 0, "[%s:%d] %s %d %d", __FUNCTION__, __LINE__, JUtil::jsonToString(payload).c_str(), remove, removeAll);
     notiMsgItem *item = new NotiMsgItem(payload, remove, removeAll);
@@ -308,10 +321,10 @@ bool NotificationService::cb_getToastCount(LSHandle* lshandle, LSMessage *msg, v
     else
     {
         int displayId = request["displayId"].asNumber<int>();
-        if (displayId != 0 && displayId != 1)
+        if (!isValidDisplayId(displayId))
         {
             json.put("returnValue", false);
-            json.put("errorText", "Invalid displayId. Must be 0 or 1");
+            json.put("errorText", "Invalid displayId");
         }
         else
         {
@@ -444,8 +457,6 @@ bool NotificationService::cb_createToast(LSHandle* lshandle, LSMessage *msg, voi
     std::string errorText;
     pbnjson::JValue getActiveUserParams;
     pbnjson::JValue postToastCount = pbnjson::Object();
-    bool toastCountStatus = false;
-    int readCount, unreadCount = 0;
 
     std::string caller = LSUtils::getCallerId(msg);
     if (caller.empty())
@@ -470,18 +481,21 @@ bool NotificationService::cb_createToast(LSHandle* lshandle, LSMessage *msg, voi
         privilegedSource = true;
     }
 
-    m_display_id = request["displayId"].asNumber<int>();
     sourceId = request["sourceId"].asString();
     if (request.hasKey("displayId"))
     {
         displayId = request["displayId"].asNumber<int>();
+        if (!isValidDisplayId(displayId))
+        {
+            LOG_WARNING(MSGID_CT_DISPLAYID_INVALID, 0, "displayId %d is out of range in %s", displayId, __PRETTY_FUNCTION__);
+            errText = "Invalid displayId";
+            goto Done;
+        }
         LOG_DEBUG("Key Display ID: %d", displayId);
-        // LOG_INFO("port Key Display ID: %d", displayId);
-        LOG_WARNING(MSGID_NOTIFICATIONMGR, 0, "port [%s:%d] displayId: %d", __FUNCTION__, __LINE__, displayId);
     }
+    m_display_id = displayId;
 
-    if (displayId >= 0)
-        toastCountVector[displayId].unreadCount++;
+    toastCountVector[displayId].unreadCount++;
 
     if (sourceId.length() == 0)
     {
@@ -697,13 +711,10 @@ bool NotificationService::cb_createToast(LSHandle* lshandle, LSMessage *msg, voi
     if (onclick.isNull()) // launch the app that creates the toast.
     {
         postToastCount.put("displayId", displayId);
-        if (displayId >= 0)
-        {
-            postToastCount.put("readCount", toastCountVector[displayId].readCount);
-            postToastCount.put("unreadCount", toastCountVector[displayId].unreadCount);
-            postToastCount.put("totalCount", toastCountVector[displayId].readCount + toastCountVector[displayId].unreadCount);
-        }
-        toastCountStatus = NotificationService::instance()->postToastCountNotification(std::move(postToastCount), staleMsg, persistentMsg, errText);
+        postToastCount.put("readCount", toastCountVector[displayId].readCount);
+        postToastCount.put("unreadCount", toastCountVector[displayId].unreadCount);
+        postToastCount.put("totalCount", toastCountVector[displayId].readCount + toastCountVector[displayId].unreadCount);
+        NotificationService::instance()->postToastCountNotification(std::move(postToastCount), staleMsg, persistentMsg, errText);
         // Check the SourceId exist in the App list.
         if (AppList::instance()->isAppExist(sourceId))
         {
@@ -2494,6 +2505,12 @@ bool NotificationService::cb_removeAllNotification(LSHandle* lshandle, LSMessage
     if (request.hasKey("displayId"))
     {
         displayId = request["displayId"].asNumber<int>();
+        if (!isValidDisplayId(displayId))
+        {
+            LOG_WARNING(MSGID_CT_DISPLAYID_INVALID, 0, "displayId %d is out of range in %s", displayId, __PRETTY_FUNCTION__);
+            errText = "Invalid displayId";
+            goto Done;
+        }
         LOG_DEBUG("Display ID: %d", displayId);
     }
     LOG_DEBUG("Remove Payload: %s", JUtil::jsonToString(std::move(request)).c_str());
@@ -2504,10 +2521,8 @@ bool NotificationService::cb_removeAllNotification(LSHandle* lshandle, LSMessage
     //Post the message
     NotificationService::instance()->postNotification(postRemoveAllNotiMessage, false, true);
     success = true;
-    if (displayId >= 0) {
-        toastCountVector[displayId].readCount = 0;
-        toastCountVector[displayId].unreadCount = 0;
-    }
+    toastCountVector[displayId].readCount = 0;
+    toastCountVector[displayId].unreadCount = 0;
 
 Done:
     pbnjson::JValue json = pbnjson::Object();
@@ -3049,7 +3064,15 @@ bool NotificationService::cb_setToastStatus(LSHandle *lshandle, LSMessage *msg, 
 
     std::string toastId = json["toastId"].asString();
     bool status = json["readStatus"].asBool();
-    int displayId = json["displayId"].asNumber<int>();
+    int displayId = json.hasKey("displayId") ? json["displayId"].asNumber<int>() : 0;
+
+    if (!isValidDisplayId(displayId))
+    {
+        LOG_DEBUG("displayId is out of range");
+        json.put("errorText", "Invalid displayId");
+        json.put("returnValue", false);
+        goto Done;
+    }
 
     if (!json.hasKey("toastId"))
     {
@@ -3106,20 +3129,17 @@ bool NotificationService::cb_setToastStatus(LSHandle *lshandle, LSMessage *msg, 
     else
     {
         json.put("returnValue", true);
-        if (displayId >= 0)
+        if (status)
         {
-            if (status)
-            {
-                toastCountVector[displayId].readCount++;
-                if (toastCountVector[displayId].unreadCount > 0)
-                    toastCountVector[displayId].unreadCount--;
-            }
-            else
-            {
-                toastCountVector[displayId].unreadCount++;
-                if (toastCountVector[displayId].readCount > 0)
-                    toastCountVector[displayId].readCount--;
-            }
+            toastCountVector[displayId].readCount++;
+            if (toastCountVector[displayId].unreadCount > 0)
+                toastCountVector[displayId].unreadCount--;
+        }
+        else
+        {
+            toastCountVector[displayId].unreadCount++;
+            if (toastCountVector[displayId].readCount > 0)
+                toastCountVector[displayId].readCount--;
         }
     }
 
