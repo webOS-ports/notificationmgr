@@ -986,13 +986,25 @@ bool History::setReadStatus(std::string toastId, bool readStatus)
     pbnjson::JValue statusObj = pbnjson::Object();
     pbnjson::JValue merge_query = pbnjson::Object();
 
-    int pos = toastId.find("-");
-    std::string timestamp = toastId.substr(pos + 1);
+    /* A toastId is sourceId + "-" + timestamp and sourceIds contain
+     * dashes of their own - "com.webos.app.notification-11458" is an
+     * ordinary one - so the timestamp is what follows the last dash, not
+     * the first. Taking the first split "com.webos.app.notification-11458
+     * -1757500000000" after "com", and the merge then matched no row at
+     * all, or the wrong one. This is the same rule createToast builds the
+     * id with and the one Utils::extractTimestampFromId already applies.
+     */
+    std::string timestamp = Utils::extractTimestampFromId(toastId);
+    if (timestamp.empty())
+    {
+        LOG_WARNING(MSGID_SAVE_MSG_FAIL, 0, "Cannot read a timestamp out of the toastId in %s", __PRETTY_FUNCTION__);
+        return false;
+    }
 
     statusObj.put("readStatus", readStatus);
     request = pbnjson::JObject{
                 {"from", DB8_KIND},
-                {"where", pbnjson::JArray{{{"prop", "timestamp"}, {"op", "="}, {"val", timestamp.c_str()}}}}};
+                {"where", pbnjson::JArray{{{"prop", "timestamp"}, {"op", "="}, {"val", timestamp}}}}};
     merge_query.put("query", request);
     merge_query.put("props", statusObj);
 
