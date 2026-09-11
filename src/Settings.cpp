@@ -14,6 +14,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#include <fstream>
+
 #include "Settings.h"
 #include "NotificationService.h"
 
@@ -36,6 +38,7 @@ Settings::Settings():m_disableToastTimestamp(0),m_thresholdTimer(120),m_retentio
 {
 	s_settings_instance = this;
 	loadSettings();
+	loadBlockedToastApps();
 }
 
 Settings::~Settings()
@@ -326,14 +329,95 @@ bool Settings::enableToastNotification()
 	return true;
 }
 
+/*
+ * These two used to be "return true" and nothing else, so disableToast with a
+ * source was accepted, answered success, and did nothing at all - there was no
+ * way to stop one application's banners and no way to ask which were stopped.
+ */
 bool Settings::disableToastNotificationForApp(const std::string& appId)
 {
+	if (appId.empty())
+		return false;
+
+	if (m_blockedToastApps.insert(appId).second)
+		saveBlockedToastApps();
+
 	return true;
 }
 
 bool Settings::enableToastNotificationForApp(const std::string& appId)
 {
+	if (appId.empty())
+		return false;
+
+	if (m_blockedToastApps.erase(appId) > 0)
+		saveBlockedToastApps();
+
 	return true;
+}
+
+bool Settings::isToastBlockedForApp(const std::string& appId) const
+{
+	return m_blockedToastApps.find(appId) != m_blockedToastApps.end();
+}
+
+const std::set<std::string>& Settings::blockedToastApps() const
+{
+	return m_blockedToastApps;
+}
+
+void Settings::loadBlockedToastApps()
+{
+	m_blockedToastApps.clear();
+
+	char* data = Utils::readFile(s_blockedToastAppsFile);
+	if (!data)
+	{
+		/* No file yet is the ordinary case on a device nobody has turned
+		 * anything off on; it is not worth a warning. */
+		return;
+	}
+
+	pbnjson::JValue list = JUtil::parse(data, "", NULL);
+	delete[] data;
+
+	if (list.isNull() || !list.isArray())
+	{
+		LOG_WARNING(MSGID_SETTINGS_DATA_EMPTY, 0,
+			"Blocked application list is not an array in %s", __PRETTY_FUNCTION__);
+		return;
+	}
+
+	for (ssize_t i = 0; i < list.arraySize(); ++i)
+	{
+		std::string appId = list[i].asString();
+		if (!appId.empty())
+			m_blockedToastApps.insert(appId);
+	}
+}
+
+void Settings::saveBlockedToastApps()
+{
+	pbnjson::JValue list = pbnjson::Array();
+
+	for (std::set<std::string>::const_iterator it = m_blockedToastApps.begin();
+	     it != m_blockedToastApps.end(); ++it)
+	{
+		list.append(*it);
+	}
+
+	std::string serialized = pbnjson::JGenerator::serialize(list,
+			pbnjson::JSchemaFragment("{}"));
+
+	std::ofstream out(s_blockedToastAppsFile, std::ios::trunc);
+	if (!out)
+	{
+		LOG_WARNING(MSGID_SETTINGS_FILE_LOAD_FAILED, 0,
+			"Cannot write %s in %s", s_blockedToastAppsFile, __PRETTY_FUNCTION__);
+		return;
+	}
+
+	out << serialized;
 }
 
 bool Settings::isPartOfAggregators(std::string sId)

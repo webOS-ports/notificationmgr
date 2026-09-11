@@ -62,6 +62,7 @@ NotificationService::toastCount NotificationService::toastCountVector[] = {};
 static LSMethod s_methods[] =
 {
     { "createToast", NotificationService::cb_createToast},
+    { "getToastSettings", NotificationService::cb_getToastSettings},
     { "createAlert", NotificationService::cb_createAlert},
     { "closeToast", NotificationService::cb_closeToast},
     { "closeAlert", NotificationService::cb_closeAlert},
@@ -513,6 +514,22 @@ bool NotificationService::cb_createToast(LSHandle* lshandle, LSMessage *msg, voi
     if (!ignoreDisable && UiStatus::instance().toast() && !(UiStatus::instance().toast())->isEnabled(UiStatus::ENABLE_ALL & ~UiStatus::ENABLE_UI))
     {
         errText = "Toast is blocked by " + (UiStatus::instance().toast())->reason();
+        goto Done;
+    }
+
+    /*
+     * The same question, one application at a time. Answered here rather than
+     * anywhere earlier because sourceId is only settled a few lines up, and
+     * only after the caller has been checked against it - otherwise an
+     * application could dodge its own block by naming someone else.
+     *
+     * "ignoreDisable" is honoured for the same reason the global check
+     * honours it: that flag is how a privileged caller says this is a system
+     * message rather than an application's own notification.
+     */
+    if (!ignoreDisable && Settings::instance()->isToastBlockedForApp(sourceId))
+    {
+        errText = "Toast is blocked for " + sourceId;
         goto Done;
     }
 
@@ -1689,6 +1706,89 @@ None
 */
 //->End of API documentation comment block
 
+/*
+ * The state enableToast and disableToast move, in one place so a settings
+ * panel can draw it: whether banners are on at all, and which applications
+ * have been told not to put one up.
+ */
+pbnjson::JValue NotificationService::toastSettingsPayload()
+{
+    pbnjson::JValue json = pbnjson::Object();
+    pbnjson::JValue blocked = pbnjson::Array();
+
+    const std::set<std::string>& apps = Settings::instance()->blockedToastApps();
+    for (std::set<std::string>::const_iterator it = apps.begin(); it != apps.end(); ++it)
+        blocked.append(*it);
+
+    json.put("returnValue", true);
+    json.put("enabled", UiStatus::instance().toast()
+             ? (UiStatus::instance().toast())->isEnabled(UiStatus::ENABLE_ALL & ~UiStatus::ENABLE_UI)
+             : true);
+    json.put("blockedApps", blocked);
+
+    return json;
+}
+
+void NotificationService::postToastSettings()
+{
+    LSErrorSafe lserror;
+
+    pbnjson::JValue json = toastSettingsPayload();
+    std::string payload = pbnjson::JGenerator::serialize(json, pbnjson::JSchemaFragment("{}"));
+
+    if (!LSSubscriptionPost(getHandle(), get_category(), "getToastSettings",
+                            payload.c_str(), &lserror) && lserror.message)
+    {
+        LOG_WARNING(MSGID_NOTIFY_INVOKE_FAILED, 1,
+            PMLOGKS("API", "getToastSettings"), "%s", lserror.message);
+    }
+}
+
+//->Start of API documentation comment block
+/**
+@page com_webos_notification com.webos.notification
+@{
+@section com_webos_notification_getToastSettings getToastSettings
+
+Whether toasts are shown, and which applications have been blocked from
+showing one with disableToast.
+
+@par Parameters
+Name      | Required | Type    | Description
+----------|----------|---------|------------
+subscribe | No       | Boolean | Receive the list again whenever it changes
+
+@par Returns(Call)
+Name         | Required | Type    | Description
+-------------|----------|---------|------------
+returnValue  | yes      | Boolean | True
+enabled      | yes      | Boolean | False while toasts are blocked for everything
+blockedApps  | yes      | Array   | The application ids that may not show one
+subscribed   | yes      | Boolean | True if subscribed
+
+@par Returns(Subscription)
+The same object, whenever it changes.
+@}
+*/
+//->End of API documentation comment block
+bool NotificationService::cb_getToastSettings(LSHandle* lshandle, LSMessage *msg, void *user_data)
+{
+    LSErrorSafe lserror;
+    bool subscribed = false;
+
+    if (LSMessageIsSubscription(msg))
+        LSSubscriptionProcess(lshandle, msg, &subscribed, &lserror);
+
+    pbnjson::JValue json = toastSettingsPayload();
+    json.put("subscribed", subscribed);
+
+    std::string result = pbnjson::JGenerator::serialize(json, pbnjson::JSchemaFragment("{}"));
+    if (!LSMessageReply(lshandle, msg, result.c_str(), &lserror))
+        return false;
+
+    return true;
+}
+
 bool NotificationService::cb_enableToast(LSHandle* lshandle, LSMessage *msg, void *user_data)
 {
 	LSErrorSafe lserror;
@@ -1756,6 +1856,11 @@ Done:
 			" ");
 		json.put("errorText", errText);
         }
+
+	/* A settings panel draws this list; tell it rather than making it ask
+	 * again on a timer. */
+	if (success)
+		NotificationService::instance()->postToastSettings();
 
 	std::string result = pbnjson::JGenerator::serialize(json, pbnjson::JSchemaFragment("{}"));
 	if(!LSMessageReply( lshandle, msg, result.c_str(), &lserror))
@@ -1840,6 +1945,11 @@ Done:
 	{
 		json.put("errorText", errText);
 	}
+
+	/* A settings panel draws this list; tell it rather than making it ask
+	 * again on a timer. */
+	if (success)
+		NotificationService::instance()->postToastSettings();
 
 	std::string result = pbnjson::JGenerator::serialize(json, pbnjson::JSchemaFragment("{}"));
 	if(!LSMessageReply( lshandle, msg, result.c_str(), &lserror))

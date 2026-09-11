@@ -17,6 +17,7 @@
 #ifndef __SETTINGS_H__
 #define __SETTINGS_H__
 
+#include <set>
 #include <string>
 #include <stdlib.h>
 #include <luna-service2/lunaservice.h>
@@ -27,6 +28,10 @@ static const char* const s_settingsFile = "@WEBOS_INSTALL_WEBOS_PREFIX@/notifica
 static const char* const s_defaultToastIcon = "@WEBOS_INSTALL_WEBOS_PREFIX@/notificationmgr/images/toast-notification-icon.png";
 static const char* const s_defaultAlertIcon = "@WEBOS_INSTALL_WEBOS_PREFIX@/notificationmgr/images/alert-notification-icon.png";
 static const char* const s_lockFile = "@WEBOS_INSTALL_SYSMGR_LOCALSTATEDIR@/preferences/lock";
+/* Which applications may not put a banner on screen. Kept next to the other
+ * things the shell remembers about a device, so it survives a restart the way
+ * every other notification setting a person changes is expected to. */
+static const char* const s_blockedToastAppsFile = "@WEBOS_INSTALL_SYSMGR_LOCALSTATEDIR@/preferences/notification-blocked-apps.json";
 
 class Settings {
 
@@ -43,7 +48,12 @@ public:
 
 	bool isPartOfAggregators(std::string sId);
 
+	bool isToastBlockedForApp(const std::string& appId) const;
+	const std::set<std::string>& blockedToastApps() const;
+
 	void loadSettings();
+	void loadBlockedToastApps();
+	void saveBlockedToastApps();
 
 	int getRetentionPeriod();
 	std::string getDefaultIcon(const std::string type);
@@ -62,6 +72,7 @@ private:
 	int m_thresholdTimer;
 	int m_retentionPeriod;
 	std::vector<std::string> m_notificationAggregator;
+	std::set<std::string> m_blockedToastApps;
 
 public:
 	std::string m_system_pincode;

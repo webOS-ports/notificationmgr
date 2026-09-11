@@ -27,6 +27,7 @@
         "com.webos.notification/enable",
         "com.webos.notification/disable",
         "com.webos.notification/getToastCount",
+        "com.webos.notification/getToastSettings",
         "com.webos.notification/getToastList",
         "com.webos.notification/setToastStatus"
     ]

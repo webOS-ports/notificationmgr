@@ -54,6 +54,12 @@ public:
     static bool cb_getToastList(LSHandle *lshandle, LSMessage *msg, void *user_data);
     static bool cb_setToastStatus(LSHandle *lshandle, LSMessage *msg, void *user_data);
     static bool cb_createToast(LSHandle* lshandle, LSMessage *msg, void *user_data);
+    static bool cb_getToastSettings(LSHandle* lshandle, LSMessage *msg, void *user_data);
+
+    /* Shared by cb_getToastSettings and by the two switches that move it.
+     * Not static: posting needs this service's own handle and category. */
+    static pbnjson::JValue toastSettingsPayload();
+    void postToastSettings();
     static bool cb_createAlert(LSHandle* lshandle, LSMessage *msg, void *user_data);
     static bool cb_createAlertIsAllowed(LSHandle* lshandle, LSMessage *msg, void *user_data);
     static bool cb_createInputAlert(LSHandle* lshandle, LSMessage *msg, void *user_data);
