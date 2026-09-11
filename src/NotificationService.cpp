@@ -98,6 +98,11 @@ NotificationService::NotificationService()
 
 NotificationService::~NotificationService()
 {
+    while(!notiMsgQueue.empty())
+    {
+        delete notiMsgQueue.front();
+        notiMsgQueue.pop();
+    }
 }
 
 NotificationService* NotificationService::instance()
@@ -186,18 +191,33 @@ bool NotificationService::isValidDisplayId(int displayId)
     return displayId >= 0 && displayId < NUM_DISPLAYS;
 }
 
-void NotificationService::pushNotiMsgQueue(pbnjson::JValue payload, bool remove, bool removeAll) {
-    LOG_WARNING("notificationmgr", 0, "[%s:%d] %s %d %d", __FUNCTION__, __LINE__, JUtil::jsonToString(payload).c_str(), remove, removeAll);
-    notiMsgItem *item = new NotiMsgItem(payload, remove, removeAll);
-    notiMsgQueue.push(item);
+/*
+ * Everything that arrives before the shell has subscribed is held until it
+ * does. Nothing guarantees that it ever will - on a device whose UI failed to
+ * come up the queues just grow, one entry per notification, for as long as the
+ * daemon runs. Keep the most recent kMaxQueuedMessages and say when something
+ * is dropped; a notification nobody can see yet is worth holding, but not at
+ * the cost of the process.
+ */
+bool NotificationService::queueHasRoom(size_t size, const char *which)
+{
+    if (size < kMaxQueuedMessages)
+        return true;
+
+    LOG_WARNING(MSGID_QUEUE_FULL, 1,
+        PMLOGKS("QUEUE", which),
+        "Dropping a notification, %zu already waiting for the UI", size);
+    return false;
 }
 
-void NotificationService::popNotiMsgQueue() {
-    LOG_WARNING("notificationmgr", 0, "[%s:%d]", __FUNCTION__, __LINE__);
-    if(!notiMsgQueue.empty()) {
-        delete notiMsgQueue.front();
-        notiMsgQueue.pop();
-    }
+void NotificationService::pushNotiMsgQueue(pbnjson::JValue payload, bool remove, bool removeAll) {
+    LOG_DEBUG("[%s:%d] %s %d %d", __FUNCTION__, __LINE__, JUtil::jsonToString(payload).c_str(), remove, removeAll);
+
+    if (!queueHasRoom(notiMsgQueue.size(), "notification"))
+        return;
+
+    notiMsgItem *item = new NotiMsgItem(payload, remove, removeAll);
+    notiMsgQueue.push(item);
 }
 
 //->Start of API documentation comment block
@@ -823,7 +843,8 @@ bool NotificationService::alertRespond(LSMessage* msg, const std::string& source
 	{
 		//save the message in the queue.
 		LOG_DEBUG("createAlert: UI is not yet ready. push into msg queue.");
-		NotificationService::instance()->alertMsgQueue.push(postCreateAlert);
+		if (queueHasRoom(NotificationService::instance()->alertMsgQueue.size(), "alert"))
+			NotificationService::instance()->alertMsgQueue.push(postCreateAlert);
 	}
 	else
 	{
@@ -909,7 +930,8 @@ bool NotificationService::alertRespond(bool success, const std::string &errorTex
         {
             //save the message in the queue.
             LOG_DEBUG("createAlert: UI is not yet ready. push into msg queue.");
-            NotificationService::instance()->alertMsgQueue.push(postCreateAlert);
+            if (queueHasRoom(NotificationService::instance()->alertMsgQueue.size(), "alert"))
+                NotificationService::instance()->alertMsgQueue.push(postCreateAlert);
         }
         else
         {
@@ -1664,7 +1686,8 @@ bool NotificationService::postToastNotification(pbnjson::JValue toastNotificatio
     if(!UI_ENABLED)
     {
         //save the message in the queue.
-        toastMsgQueue.push(toastNotificationPayload);
+        if (queueHasRoom(toastMsgQueue.size(), "toast"))
+            toastMsgQueue.push(toastNotificationPayload);
         return false;
     }
 
@@ -1713,7 +1736,8 @@ bool NotificationService::postAlertNotification(pbnjson::JValue alertNotificatio
     if(!UI_ENABLED)
     {
         //save the message in the queue.
-        alertMsgQueue.push(alertNotificationPayload);
+        if (queueHasRoom(alertMsgQueue.size(), "alert"))
+            alertMsgQueue.push(alertNotificationPayload);
         return false;
     }
 
@@ -2954,38 +2978,58 @@ Done:
     return true;
 }
 
+/*
+ * Each of these takes the queue away before draining it. Posting a message the
+ * UI still is not ready for puts it back on the member queue, and the loops
+ * used to pop that same message straight off again - one push and one pop per
+ * turn, on a queue that never empties, forever. onAlertStatus() can reach
+ * processAlertMsgQueue() while UI_ENABLED is still false, so that was a live
+ * hang and not a theoretical one.
+ */
 void NotificationService::processAlertMsgQueue()
 {
-    while(!alertMsgQueue.empty())
+    std::queue<pbnjson::JValue> pending;
+    pending.swap(alertMsgQueue);
+
+    while(!pending.empty())
     {
         std::string errText;
-        NotificationService::instance()->postAlertNotification(alertMsgQueue.front(), errText);
-        alertMsgQueue.pop();
+        postAlertNotification(pending.front(), errText);
+        pending.pop();
     }
 }
 
 void NotificationService::processNotiMsgQueue()
 {
-    LOG_WARNING("notificationmgr", 0, "[%s:%d] %s", __FUNCTION__, __LINE__, notiMsgQueue.empty()? "yes" : "no");
-    while(!notiMsgQueue.empty())
+    std::queue<notiMsgItem*> pending;
+    pending.swap(notiMsgQueue);
+
+    while(!pending.empty())
     {
-        NotificationService::instance()->postNotification(notiMsgQueue.front()->getPayLoad(),notiMsgQueue.front()->getRemove(),notiMsgQueue.front()->getRemoveAll());
-        pbnjson::JValue notificationPayload = notiMsgQueue.front()->getPayLoad();
-        LOG_WARNING("notificationmgr", 0, "[%s:%d] notiMsgQueue = %s", __FUNCTION__, __LINE__, JUtil::jsonToString(std::move(notificationPayload)).c_str());
-        popNotiMsgQueue();
+        notiMsgItem *item = pending.front();
+        pending.pop();
+
+        LOG_DEBUG("[%s:%d] notiMsgQueue = %s", __FUNCTION__, __LINE__,
+            JUtil::jsonToString(item->getPayLoad()).c_str());
+
+        postNotification(item->getPayLoad(), item->getRemove(), item->getRemoveAll());
+        delete item;
     }
 }
 
 void NotificationService::processToastMsgQueue()
 {
-	std::string errText;
-    LOG_DEBUG("processToastMsgQueue processToastMsgQueue.empty() = %s", toastMsgQueue.empty()? "yes" : "no");
-    while(!toastMsgQueue.empty())
+    std::queue<pbnjson::JValue> pending;
+    pending.swap(toastMsgQueue);
+
+    while(!pending.empty())
     {
-        NotificationService::instance()->postToastNotification(toastMsgQueue.front(), false, false, errText);
-        pbnjson::JValue toastPayload = toastMsgQueue.front();
-        LOG_DEBUG("processToastMsgQueue toastMsgQueue = %s", JUtil::jsonToString( std::move(toastPayload)).c_str());
-        toastMsgQueue.pop();
+        std::string errText;
+        LOG_DEBUG("processToastMsgQueue toastMsgQueue = %s",
+            JUtil::jsonToString(pending.front()).c_str());
+
+        postToastNotification(pending.front(), false, false, errText);
+        pending.pop();
     }
 }
 

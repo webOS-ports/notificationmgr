@@ -148,9 +148,12 @@ private:
     std::queue<notiMsgItem*> notiMsgQueue;
     std::queue<pbnjson::JValue> toastMsgQueue;
 
+    //! How many messages may wait for a UI that has not subscribed yet.
+    static const size_t kMaxQueuedMessages = 256;
+    static bool queueHasRoom(size_t size, const char *which);
+
     const char* getServiceName(LSMessage *msg);
     void pushNotiMsgQueue(pbnjson::JValue payload, bool remove, bool removeAll);
-    void popNotiMsgQueue();
     static std::string m_user_name;
     static int m_display_id;
 
