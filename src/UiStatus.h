@@ -18,6 +18,7 @@
 #define __UI_STATUS_H__
 
 #include <map>
+#include <memory>
 #include <algorithm>
 #include <boost/signals2.hpp>
 
@@ -94,39 +95,25 @@ public:
 
     bool isEnabled(int mask = ENABLE_ALL) const;
 
-    UiToast* toast() {
-        auto pos = m_comps.find("toast");
-        if (pos != m_comps.end())
-            return (std::dynamic_pointer_cast<UiToast>(m_comps["toast"]).get());
-        else
-            return nullptr;
-    }
-
-    UiAlert* alert() {
-        auto pos = m_comps.find("alert");
-        if (pos != m_comps.end())
-            return (std::dynamic_pointer_cast<UiAlert>(m_comps["alert"]).get());
-        else
-            return nullptr;
-    }
-
-    UiInput* input() {
-        auto pos = m_comps.find("input");
-        if (pos != m_comps.end())
-            return (std::dynamic_pointer_cast<UiInput>(m_comps["input"]).get());
-        else
-            return nullptr;
-    }
-
-    UiPrompt* prompt() {
-        auto pos = m_comps.find("prompt");
-        if (pos != m_comps.end())
-            return (std::dynamic_pointer_cast<UiPrompt>(m_comps["prompt"]).get());
-        else
-            return nullptr;
-    }
+    UiToast*  toast()  { return comp<UiToast>("toast"); }
+    UiAlert*  alert()  { return comp<UiAlert>("alert"); }
+    UiInput*  input()  { return comp<UiInput>("input"); }
+    UiPrompt* prompt() { return comp<UiPrompt>("prompt"); }
 
 private:
+    /* Each of these used to find() the entry and then look it up a second
+     * time with operator[], which on a map that does not have the key
+     * inserts one - and inserts a null shared_ptr at that. */
+    template <typename T>
+    T* comp(const char *name)
+    {
+        auto pos = m_comps.find(name);
+        if (pos == m_comps.end())
+            return nullptr;
+
+        return std::dynamic_pointer_cast<T>(pos->second).get();
+    }
+
     std::map<std::string, std::shared_ptr<UiComp> > m_comps;
 };
 
