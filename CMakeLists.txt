@@ -71,6 +71,15 @@ include_directories(src)
 file (GLOB_RECURSE SOURCES src/*.cpp)
 add_executable(notificationmgr ${SOURCES})
 
+# Sanitizers for the test and hardening harness. Never on for an image build -
+# they change the ABI of the binary and cost both size and speed:
+#   cmake -DENABLE_SANITIZERS=address ...
+if(ENABLE_SANITIZERS)
+    message(STATUS "Building with -fsanitize=${ENABLE_SANITIZERS}")
+    webos_add_compiler_flags(ALL -fsanitize=${ENABLE_SANITIZERS} -fno-omit-frame-pointer -g)
+    link_libraries(-fsanitize=${ENABLE_SANITIZERS})
+endif()
+
 target_link_libraries(notificationmgr
     ${GLIB2_LDFLAGS}
     ${GLIBMM_LDFLAGS}
@@ -93,3 +102,10 @@ install(PROGRAMS ${confFile} DESTINATION ${WEBOS_INSTALL_WEBOS_PREFIX}/notificat
 webos_build_daemon(NAME notificationmgr LAUNCH files/launch)
 webos_build_system_bus_files()
 webos_build_db8_files()
+
+# Unit tests, off unless asked for. See tests/README.md.
+option(BUILD_TESTING "Build the notificationmgr unit tests" OFF)
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

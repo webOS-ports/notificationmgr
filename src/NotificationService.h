@@ -87,6 +87,11 @@ public:
     static bool cb_launch(LSHandle* lshandle, LSMessage *msg, void *user_data);
     static bool parseDoc(const char *docname);
 
+    /*! Is this a display this device has, and so an index into
+     * toastCountVector? Public so the tests can check the bound.
+     */
+    static bool isValidDisplayId(int displayId);
+
     bool postToastNotification(pbnjson::JValue toastNotificationPayload, bool staleMsg, bool persistentMsg, std::string &errorText);
     bool postToastCountNotification(pbnjson::JValue toastCountPayload, bool staleMsg, bool persistentMsg, std::string &errorText);
     bool postAlertNotification(pbnjson::JValue alertNotificationPayload, std::string &errorText);
@@ -163,9 +168,6 @@ private:
     } toastCount;
 
     static toastCount toastCountVector[NUM_DISPLAYS];
-
-    //! Is this a display this device has, and so an index into toastCountVector?
-    static bool isValidDisplayId(int displayId);
 
 protected:
     //LSMethod* get_private_methods() const;
