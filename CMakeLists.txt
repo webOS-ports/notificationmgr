@@ -30,6 +30,10 @@ pkg_check_modules(GLIB2 REQUIRED glib-2.0)
 include_directories(${GLIB2_INCLUDE_DIRS})
 webos_add_compiler_flags(ALL ${GLIB2_CFLAGS})
 
+pkg_check_modules(GLIBMM REQUIRED glibmm-2.4)
+include_directories(${GLIBMM_INCLUDE_DIRS})
+webos_add_compiler_flags(ALL ${GLIBMM_CFLAGS})
+
 pkg_check_modules(LUNASERVICE REQUIRED luna-service2)
 include_directories(${LUNASERVICE_INCLUDE_DIRS})
 webos_add_compiler_flags(ALL ${LUNASERVICE_CFLAGS})
@@ -48,13 +52,13 @@ webos_add_compiler_flags(ALL ${Boost_CFLAGS_OTHER})
 add_definitions(-DBOOST_BIND_NO_PLACEHOLDERS)
 
 # -- check for libxml++
-pkg_check_modules(LIBXMLXX REQUIRED libxml++-2.6)
+pkg_check_modules(LIBXMLXX REQUIRED libxml++-5.0)
 webos_add_compiler_flags(ALL ${LIBXMLXX_CFLAGS})
 
 pkg_check_modules(OPENSSL REQUIRED openssl)
 webos_add_compiler_flags(ALL ${OPENSSL_CFLAGS})
 
-webos_add_compiler_flags(ALL -Wall "-std=c++11")
+webos_add_compiler_flags(ALL -Wall "-std=c++17")
 
 webos_add_linker_options(ALL --no-undefined)
 
@@ -67,8 +71,18 @@ include_directories(src)
 file (GLOB_RECURSE SOURCES src/*.cpp)
 add_executable(notificationmgr ${SOURCES})
 
+# Sanitizers for the test and hardening harness. Never on for an image build -
+# they change the ABI of the binary and cost both size and speed:
+#   cmake -DENABLE_SANITIZERS=address ...
+if(ENABLE_SANITIZERS)
+    message(STATUS "Building with -fsanitize=${ENABLE_SANITIZERS}")
+    webos_add_compiler_flags(ALL -fsanitize=${ENABLE_SANITIZERS} -fno-omit-frame-pointer -g)
+    link_libraries(-fsanitize=${ENABLE_SANITIZERS})
+endif()
+
 target_link_libraries(notificationmgr
     ${GLIB2_LDFLAGS}
+    ${GLIBMM_LDFLAGS}
     ${LUNASERVICE_LDFLAGS}
     ${PBNJSON_CPP_LDFLAGS}
     ${PMLOG_LDFLAGS}
@@ -88,3 +102,10 @@ install(PROGRAMS ${confFile} DESTINATION ${WEBOS_INSTALL_WEBOS_PREFIX}/notificat
 webos_build_daemon(NAME notificationmgr LAUNCH files/launch)
 webos_build_system_bus_files()
 webos_build_db8_files()
+
+# Unit tests, off unless asked for. See tests/README.md.
+option(BUILD_TESTING "Build the notificationmgr unit tests" OFF)
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

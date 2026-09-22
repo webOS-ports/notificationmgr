@@ -60,6 +60,14 @@ JUtil::~JUtil()
 
 pbnjson::JValue JUtil::parse(const char *rawData, const std::string &schemaName, Error *error)
 {
+    /* LSMessageGetPayload() can return null, and every caller here hands its
+     * result straight over. */
+    if (!rawData)
+    {
+        if (error) error->set(Error::Parse, "No payload");
+        return pbnjson::JValue();
+    }
+
     pbnjson::JSchema schema = JUtil::instance().loadSchema(schemaName, true);
     if (!schema.isInitialized())
     {
@@ -67,7 +75,6 @@ pbnjson::JValue JUtil::parse(const char *rawData, const std::string &schemaName,
         return pbnjson::JValue();
     }
 
-    pbnjson::JInput input(rawData);
     pbnjson::JDomParser parser;
     if (!parser.parse(rawData, schema))
     {
@@ -106,7 +113,7 @@ pbnjson::JSchema JUtil::loadSchema(const std::string& schemaName, bool cache)
             return it->second;
     }
 
-    pbnjson::JSchema schema = pbnjson::JSchemaFile(kSchemaPath + schemaName + ".schema");
+    pbnjson::JSchema schema = pbnjson::JSchema::fromFile((kSchemaPath + schemaName + ".schema").c_str());
     if (!schema.isInitialized())
         return schema;
 

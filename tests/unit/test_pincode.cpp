@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 LG Electronics, Inc.
+// Copyright (c) 2026 Herman van Hazendonk <github.com@herrie.org>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,29 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-#ifndef PINCODE_VALIDATOR_H
-#define PINCODE_VALIDATOR_H
+#include "check.h"
 
-#include <string>
+#include <PincodeValidator.h>
 
-class PincodeValidator
+TEST(Pincode, acceptsTheCodeItWasGiven)
 {
-public:
-    explicit PincodeValidator(const std::string& code);
+    PincodeValidator v("1234");
+    CHECK(v.check("1234"));
+}
 
-    bool check(const std::string& input) const;
+TEST(Pincode, refusesEverythingElse)
+{
+    PincodeValidator v("1234");
+    CHECK(!v.check("1235"));
+    CHECK(!v.check("123"));
+    CHECK(!v.check("12345"));
+    CHECK(!v.check("0000"));
+    CHECK(!v.check(""));
+}
 
-private:
-    std::string m_code;
-};
-
-#endif
+//! An empty input is refused before the stored code is even consulted.
+TEST(Pincode, refusesAnEmptyInput)
+{
+    PincodeValidator v("");
+    CHECK(!v.check(""));
+}

@@ -14,6 +14,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#include <fstream>
+#include <unistd.h>
+#include <cstdio>
+
 #include "Settings.h"
 #include "NotificationService.h"
 
@@ -36,6 +40,7 @@ Settings::Settings():m_disableToastTimestamp(0),m_thresholdTimer(120),m_retentio
 {
 	s_settings_instance = this;
 	loadSettings();
+	loadBlockedToastApps();
 }
 
 Settings::~Settings()
@@ -158,7 +163,7 @@ bool Settings::cbSystemSettingsStatusNotification(LSHandle* lshandle, LSMessage 
 			Settings::cb_getSystemSettingForOption, NULL, NULL, &lserror) == false)
 		{
 			LOG_WARNING(MSGID_SETTINGS_GETSYSTEMSETTINGS_OPTION_FAILED, 1,
-				PMLOGKS("ERROR", lserror.message), " ");
+				PMLOGKS("ERROR", lserror.message ? lserror.message : "unknown"), " ");
 		}
 	}
 
@@ -326,32 +331,167 @@ bool Settings::enableToastNotification()
 	return true;
 }
 
+/*
+ * These two used to be "return true" and nothing else, so disableToast with a
+ * source was accepted, answered success, and did nothing at all - there was no
+ * way to stop one application's banners and no way to ask which were stopped.
+ */
 bool Settings::disableToastNotificationForApp(const std::string& appId)
 {
+	if (appId.empty())
+		return false;
+
+	if (m_blockedToastApps.insert(appId).second)
+		saveBlockedToastApps();
+
 	return true;
 }
 
 bool Settings::enableToastNotificationForApp(const std::string& appId)
 {
+	if (appId.empty())
+		return false;
+
+	if (m_blockedToastApps.erase(appId) > 0)
+		saveBlockedToastApps();
+
 	return true;
 }
 
-bool Settings::isPartOfAggregators(std::string sId)
+bool Settings::isToastBlockedForApp(const std::string& appId) const
 {
-	bool isExist = false;
+	return m_blockedToastApps.find(appId) != m_blockedToastApps.end();
+}
 
-	for(std::vector<std::string>::iterator it = m_notificationAggregator.begin(); it != m_notificationAggregator.end(); ++it)
+const std::set<std::string>& Settings::blockedToastApps() const
+{
+	return m_blockedToastApps;
+}
+
+void Settings::loadBlockedToastApps()
+{
+	m_blockedToastApps.clear();
+
+	char* data = Utils::readFile(s_blockedToastAppsFile);
+	if (!data)
 	{
-		std::string item = (*it);
-		if(sId.find(item,0) == std::string::npos) {
-			isExist = false;
+		/* No file yet is the ordinary case on a device nobody has turned
+		 * anything off on; it is not worth a warning. */
+		return;
+	}
+
+	pbnjson::JValue list = JUtil::parse(data, "", NULL);
+	delete[] data;
+
+	if (list.isNull() || !list.isArray())
+	{
+		LOG_WARNING(MSGID_SETTINGS_DATA_EMPTY, 0,
+			"Blocked application list is not an array in %s", __PRETTY_FUNCTION__);
+		return;
+	}
+
+	const ssize_t size = list.arraySize();
+	for (ssize_t i = 0; i < size; ++i)
+	{
+		std::string appId = list[i].asString();
+		if (!appId.empty())
+			m_blockedToastApps.insert(appId);
+	}
+}
+
+void Settings::saveBlockedToastApps()
+{
+	pbnjson::JValue list = pbnjson::Array();
+
+	for (std::set<std::string>::const_iterator it = m_blockedToastApps.begin();
+	     it != m_blockedToastApps.end(); ++it)
+	{
+		list.append(*it);
+	}
+
+	std::string serialized = pbnjson::JGenerator::serialize(list,
+			pbnjson::JSchemaFragment("{}"));
+
+	/*
+	 * Write beside the file and rename over it. Truncating in place means
+	 * that a device losing power between the truncate and the flush comes
+	 * back up with an empty or half-written list, and this is a file read
+	 * once at startup - a person's choices would be silently gone. rename()
+	 * within a directory is atomic, so a reader sees either the old list or
+	 * the new one.
+	 */
+	const std::string finalPath(s_blockedToastAppsFile);
+	const std::string tmpPath = finalPath + ".tmp";
+
+	{
+		std::ofstream out(tmpPath.c_str(), std::ios::trunc | std::ios::binary);
+		if (!out)
+		{
+			LOG_WARNING(MSGID_SETTINGS_FILE_SAVE_FAILED, 0,
+				"Cannot write %s in %s", tmpPath.c_str(), __PRETTY_FUNCTION__);
+			return;
 		}
-		else {
-			return true;
+
+		out << serialized;
+		out.flush();
+
+		if (!out)
+		{
+			LOG_WARNING(MSGID_SETTINGS_FILE_SAVE_FAILED, 0,
+				"Failed writing %s in %s", tmpPath.c_str(), __PRETTY_FUNCTION__);
+			out.close();
+			::unlink(tmpPath.c_str());
+			return;
 		}
 	}
 
-	return isExist;
+	if (::rename(tmpPath.c_str(), finalPath.c_str()) != 0)
+	{
+		LOG_WARNING(MSGID_SETTINGS_FILE_SAVE_FAILED, 0,
+			"Cannot replace %s in %s", finalPath.c_str(), __PRETTY_FUNCTION__);
+		::unlink(tmpPath.c_str());
+	}
+}
+
+/*
+ * An id belongs to a namespace when it starts with it - and starts with the
+ * whole of it, up to a boundary, so that "com.webos.app.foo" is inside
+ * "com.webos." and "evil.com.webos.app.foo" is not. Every check below used
+ * find() != npos, which answers "does this appear anywhere", and that is not
+ * the same question.
+ */
+bool Settings::idHasPrefix(const std::string& id, const std::string& prefix)
+{
+	if (prefix.empty() || id.size() < prefix.size())
+		return false;
+
+	if (id.compare(0, prefix.size(), prefix) != 0)
+		return false;
+
+	/* A prefix written with its trailing dot ("com.webos.") has already
+	 * consumed the boundary. One written without ("com.webos.app.foo") has
+	 * to be the whole id, or be followed by a separator - otherwise
+	 * "com.webos.app.foobar" would pass as "com.webos.app.foo".
+	 */
+	if (prefix[prefix.size() - 1] == '.')
+		return true;
+
+	if (id.size() == prefix.size())
+		return true;
+
+	const char next = id[prefix.size()];
+	return next == '.' || next == '-' || next == ' ';
+}
+
+bool Settings::isPartOfAggregators(const std::string& sId)
+{
+	for(std::vector<std::string>::const_iterator it = m_notificationAggregator.begin(); it != m_notificationAggregator.end(); ++it)
+	{
+		if(idHasPrefix(sId, *it))
+			return true;
+	}
+
+	return false;
 }
 
 int Settings::getRetentionPeriod()
@@ -359,7 +499,7 @@ int Settings::getRetentionPeriod()
 	return m_retentionPeriod;
 }
 
-std::string Settings::getDefaultIcon(const std::string type)
+std::string Settings::getDefaultIcon(const std::string& type)
 {
 	if(type.empty())
 		return s_defaultToastIcon;
@@ -376,9 +516,18 @@ std::string Settings::getDefaultIcon(const std::string type)
 
 bool Settings::isPrivilegedSource(const std::string &callerId)
 {
-	if(callerId.find("com.palm.",0) == std::string::npos && callerId.find("com.webos.", 0) == std::string::npos && callerId.find("com.lge.",0) == std::string::npos)
+	static const char* const privilegedPrefixes[] = {
+		"com.palm.",
+		"com.webos.",
+		"com.lge.",
+		"org.webosports.",
+	};
+
+	for (size_t i = 0; i < sizeof(privilegedPrefixes) / sizeof(privilegedPrefixes[0]); ++i)
 	{
-		return false;
+		if (idHasPrefix(callerId, privilegedPrefixes[i]))
+			return true;
 	}
-	return true;
+
+	return false;
 }

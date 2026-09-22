@@ -60,8 +60,8 @@ Canvas * Canvas::instance()
 }
 
 Canvas::Canvas()
-  :lineSpacing(0)
-  ,level(0)
+  :level(0)
+  ,lineSpacing(0)
   ,bold(false)
   ,italic(false)
   ,text_size(0)
@@ -93,6 +93,10 @@ MySaxParser::~MySaxParser()
 void MySaxParser::on_start_document()
 {
     LOG_DEBUG("on_start_XML_document");
+    /* This is file scope and parseDoc() runs the parser twice, so without
+     * clearing it the second document starts on top of the first one's
+     * element names and keeps them forever after. */
+    nodes.clear();
 }
 
 void MySaxParser::on_end_document()
@@ -100,7 +104,7 @@ void MySaxParser::on_end_document()
     LOG_DEBUG("on_end_XML_document");
 }
 
-void MySaxParser::on_start_element(const Glib::ustring& name,
+void MySaxParser::on_start_element(const xmlpp::ustring& name,
                                    const AttributeList& attributes)
 {
     nodes.push_back(name);
@@ -130,16 +134,18 @@ void MySaxParser::on_start_element(const Glib::ustring& name,
     }
 }
 
-void MySaxParser::on_end_element(const Glib::ustring& /* name */)
+void MySaxParser::on_end_element(const xmlpp::ustring& /* name */)
 {
     LOG_DEBUG("on_end XML element");
     on_end_elem = true;
 }
 
-void MySaxParser::on_characters(const Glib::ustring& text)
+void MySaxParser::on_characters(const xmlpp::ustring& text)
 {
-    if(!on_end_elem && !have_attribute)
+    if(!on_end_elem && !have_attribute && !nodes.empty())
     {
+        /* Character data outside any element - which a malformed document
+         * can produce - used to read nodes.back() off an empty vector. */
         //process Key_pair value with Node and level
         std::string key = nodes.back();
         if(Schedule::schedule_parsing)
@@ -151,22 +157,22 @@ void MySaxParser::on_characters(const Glib::ustring& text)
     have_attribute = false;
 }
 
-void MySaxParser::on_comment(const Glib::ustring& text)
+void MySaxParser::on_comment(const xmlpp::ustring& text)
 {
     LOG_DEBUG("Xml Comment %s",text.c_str());
 }
 
-void MySaxParser::on_warning(const Glib::ustring& text)
+void MySaxParser::on_warning(const xmlpp::ustring& text)
 {
     LOG_DEBUG("Xml warning %s",text.c_str());
 }
 
-void MySaxParser::on_error(const Glib::ustring& text)
+void MySaxParser::on_error(const xmlpp::ustring& text)
 {
     LOG_DEBUG("Xml ERROR %s",text.c_str());
 }
 
-void MySaxParser::on_fatal_error(const Glib::ustring& text)
+void MySaxParser::on_fatal_error(const xmlpp::ustring& text)
 {
     LOG_DEBUG("Xml FATAL_ERROR %s",text.c_str());
 }
@@ -198,7 +204,7 @@ void Schedule::process_Schedule_Objects(pbnjson::JValue &Obj)
 
 }
 
-void Schedule::process_Schedule_OnCharacter(std::string key,std::string value)
+void Schedule::process_Schedule_OnCharacter(const std::string& key, const std::string& value)
 {
 
     if(key.compare("CanvasName") == 0)
@@ -286,7 +292,7 @@ void Canvas::process_Canvas_Objects(pbnjson::JValue &Obj, int level)
 
 }
 
-void Canvas::process_Canvas_OnCharacter(std::string key,std::string value)
+void Canvas::process_Canvas_OnCharacter(const std::string& key, const std::string& value)
 {
     Canvas *canv_Obj = Canvas::instance();
     if(key.compare("BkColor") == 0 && canv_Obj->window_flag)

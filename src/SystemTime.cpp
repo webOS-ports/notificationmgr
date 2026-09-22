@@ -37,7 +37,7 @@ void SystemTime::startSync()
         JUtil::jsonToString(std::move(json)).c_str(),
         SystemTime::cbRegisterServerStatus, this, NULL, &lserror))
     {
-        LOG_WARNING(MSGID_SYSTEMTIME_REG_FAIL, 1, PMLOGKS("REASON", lserror.message), " ");
+        LOG_WARNING(MSGID_SYSTEMTIME_REG_FAIL, 1, PMLOGKS("REASON", lserror.message ? lserror.message : "unknown"), " ");
     }
 }
 
@@ -52,7 +52,7 @@ void SystemTime::setSync(bool sync, std::string time_source, int64_t utc_time)
     }
 
     m_isSynced = sync;
-    m_utc_time = std::move(utc_time);
+    m_utc_time = utc_time;
     m_time_source = std::move(time_source);
 
     sigSync(sync);
@@ -91,7 +91,7 @@ bool SystemTime::cbRegisterServerStatus(LSHandle *lshandle, LSMessage *message, 
             JUtil::jsonToString(std::move(param)).c_str(),
             SystemTime::cbGetSystemTime, user_data, NULL, &lserror))
         {
-            LOG_WARNING(MSGID_SYSTEMTIME_GETTIME_FAIL, 1, PMLOGKS("REASON", lserror.message), " ");
+            LOG_WARNING(MSGID_SYSTEMTIME_GETTIME_FAIL, 1, PMLOGKS("REASON", lserror.message ? lserror.message : "unknown"), " ");
         }
     }
 
