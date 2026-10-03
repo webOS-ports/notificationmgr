@@ -58,6 +58,16 @@
                 }
             }
         },
+        "soundClass": {
+            "type": "string",
+            "optional": true,
+            "description": "Sound class to play the toast's sound in"
+        },
+        "soundFile": {
+            "type": "string",
+            "optional": true,
+            "description": "Sound file to play with the toast"
+        },
         "type": {
             "type" : "string",
             "description" : "Defines the toast type",
