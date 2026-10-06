@@ -19,6 +19,7 @@
                 "com.webos.app.notification*",
                 "com.webos.monitor*",
                 "com.palm.webappmanager",
+                "com.webos.notification.client*",
                 "com.webos.lunasend-*"
             ]
         }
