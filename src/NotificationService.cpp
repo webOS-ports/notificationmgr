@@ -421,6 +421,8 @@ stale    | no   | Boolean | Indicates toast is old and doesn't need to be displa
 persistent | no | Boolean | Indicates toast is saved on history
 schedule | no   | Object | Defines the persistent message schedule
 type     | no   | String | Defines toast type
+soundClass | no | String | Sound class to play the toast's sound in (e.g. "notifications", "alerts", "none")
+soundFile  | no | String | Sound file to play with the toast; absolute, or relative to the application
 extra    | no   | Object | Defines extra resources
 
 @par Returns(Call)
@@ -614,6 +616,18 @@ bool NotificationService::cb_createToast(LSHandle* lshandle, LSMessage *msg, voi
         postCreateToast.put("timesource", SystemTime::instance().getTimeSource());
 
     postCreateToast.put("type", request["type"].asString());
+
+    /*
+     * The sound to play with the toast, as PalmSystem.addBannerMessage() has
+     * always taken it (WAM passes it on). Nothing here plays it: the shell's
+     * banner popup does, from these fields of the toast it receives - so they
+     * only have to reach it, which they did not while createToast copied
+     * known fields alone.
+     */
+    if (request["soundClass"].isString() && !request["soundClass"].asString().empty())
+        postCreateToast.put("soundClass", request["soundClass"].asString());
+    if (request["soundFile"].isString() && !request["soundFile"].asString().empty())
+        postCreateToast.put("soundFile", request["soundFile"].asString());
 
     if (!staleMsg && UiStatus::instance().toast() && !(UiStatus::instance().toast())->isEnabled(UiStatus::ENABLE_UI))
     {
