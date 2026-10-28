@@ -20,7 +20,9 @@
                 "com.webos.monitor*",
                 "com.palm.webappmanager",
                 "com.webos.notification.client*",
-                "com.webos.lunasend-*"
+                "com.webos.lunasend-*",
+                "com.palm.*",
+                "org.webosports.*"
             ]
         }
     ]
