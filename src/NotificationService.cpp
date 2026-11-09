@@ -624,6 +624,15 @@ bool NotificationService::cb_createToast(LSHandle* lshandle, LSMessage *msg, voi
      * only have to reach it, which they did not while createToast copied
      * known fields alone.
      */
+    /*
+     * Which of an application's toasts belong together: the shell shows one
+     * entry per sourceId and groupId, with a count, as legacy webOS showed one
+     * dashboard per thing the application chose - an email account, all of
+     * Messaging's conversations. Without one an application's toasts are a
+     * single group.
+     */
+    if (request["groupId"].isString() && !request["groupId"].asString().empty())
+        postCreateToast.put("groupId", request["groupId"].asString());
     if (request["soundClass"].isString() && !request["soundClass"].asString().empty())
         postCreateToast.put("soundClass", request["soundClass"].asString());
     if (request["soundFile"].isString() && !request["soundFile"].asString().empty())

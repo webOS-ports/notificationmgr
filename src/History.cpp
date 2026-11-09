@@ -690,6 +690,10 @@ bool History::cbDb8getToastResponse(LSHandle* lshandle, LSMessage *message, void
             {
                 toastInfoObj.put("iconPath", resultArray[index]["iconPath"]);
             }
+            if(!resultArray[index]["groupId"].isNull())
+            {
+                toastInfoObj.put("groupId", resultArray[index]["groupId"]);
+            }
             if(!resultArray[index]["title"].isNull())
             {
                 toastInfoObj.put("title", resultArray[index]["title"]);
