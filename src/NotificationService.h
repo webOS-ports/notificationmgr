@@ -54,6 +54,8 @@ public:
     static bool cb_getToastList(LSHandle *lshandle, LSMessage *msg, void *user_data);
     static bool cb_setToastStatus(LSHandle *lshandle, LSMessage *msg, void *user_data);
     static bool cb_createToast(LSHandle* lshandle, LSMessage *msg, void *user_data);
+    //! createToast's groupId, copied into the toast it posts. Public for the tests.
+    static void putGroupId(const pbnjson::JValue& request, pbnjson::JValue& toast);
     static bool cb_getToastSettings(LSHandle* lshandle, LSMessage *msg, void *user_data);
 
     /* Shared by cb_getToastSettings and by the two switches that move it.

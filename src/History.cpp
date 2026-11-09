@@ -618,6 +618,31 @@ Done:
     }
 }
 
+pbnjson::JValue History::toastInfo(const pbnjson::JValue& record)
+{
+    pbnjson::JValue info = pbnjson::Object();
+
+    // A toast saved with a toastId keeps it; one saved without - createToast
+    // saves none, it only answers with one - gets the one createToast gave
+    // it, its sourceId and timestamp.
+    if (!record["toastId"].isNull())
+        info.put("toastId", record["toastId"]);
+    else
+        info.put("toastId", record["sourceId"].asString() + "-" + record["timestamp"].asString());
+
+    static const char* const fields[] = {
+        "sourceId", "timestamp", "iconUrl", "iconPath", "groupId", "title",
+        "message", "isSysReq", "displayId", "user", "schedule", "type",
+        "action", "readStatus"
+    };
+    for (const char* field : fields)
+    {
+        if (!record[field].isNull())
+            info.put(field, record[field]);
+    }
+    return info;
+}
+
 bool History::cbDb8getToastResponse(LSHandle* lshandle, LSMessage *message, void *user_data)
 {
     LSErrorSafe lserror;
@@ -662,76 +687,8 @@ bool History::cbDb8getToastResponse(LSHandle* lshandle, LSMessage *message, void
             LOG_DEBUG("DB result is 0 %s", __PRETTY_FUNCTION__);
         }
 
-        for(ssize_t index = 0; index < resultArray.arraySize() ; ++index) {
-            pbnjson::JValue toastInfoObj = pbnjson::Object();
-            if(!resultArray[index]["sourceId"].isNull())
-            {
-                toastInfoObj.put("sourceId", resultArray[index]["sourceId"]);
-            }
-            if(!resultArray[index]["toastId"].isNull())
-            {
-                toastInfoObj.put("toastId", resultArray[index]["notiId"]);
-            }
-			else
-            {
-                std::string sourceId = resultArray[index]["sourceId"].asString();
-                std::string timestamp = resultArray[index]["timestamp"].asString();
-                toastInfoObj.put("toastId", (sourceId + "-" + timestamp));
-            }
-            if(!resultArray[index]["timestamp"].isNull())
-            {
-                toastInfoObj.put("timestamp", resultArray[index]["timestamp"]);
-            }
-            if(!resultArray[index]["iconUrl"].isNull())
-            {
-                toastInfoObj.put("iconUrl", resultArray[index]["iconUrl"]);
-            }
-            if(!resultArray[index]["iconPath"].isNull())
-            {
-                toastInfoObj.put("iconPath", resultArray[index]["iconPath"]);
-            }
-            if(!resultArray[index]["groupId"].isNull())
-            {
-                toastInfoObj.put("groupId", resultArray[index]["groupId"]);
-            }
-            if(!resultArray[index]["title"].isNull())
-            {
-                toastInfoObj.put("title", resultArray[index]["title"]);
-            }
-            if(!resultArray[index]["message"].isNull())
-            {
-                toastInfoObj.put("message", resultArray[index]["message"]);
-            }
-            if(!resultArray[index]["isSysReq"].isNull())
-            {
-                toastInfoObj.put("isSysReq", resultArray[index]["isSysReq"]);
-            }
-            if(!resultArray[index]["displayId"].isNull())
-            {
-                toastInfoObj.put("displayId", resultArray[index]["displayId"]);
-            }
-            if(!resultArray[index]["user"].isNull())
-            {
-                toastInfoObj.put("user", resultArray[index]["user"]);
-            }
-            if(!resultArray[index]["schedule"].isNull())
-            {
-                toastInfoObj.put("schedule", resultArray[index]["schedule"]);
-            }
-            if(!resultArray[index]["type"].isNull())
-            {
-                toastInfoObj.put("type", resultArray[index]["type"]);
-            }
-            if(!resultArray[index]["action"].isNull())
-            {
-                toastInfoObj.put("action", resultArray[index]["action"]);
-            }
-            if(!resultArray[index]["readStatus"].isNull())
-            {
-                toastInfoObj.put("readStatus", resultArray[index]["readStatus"]);
-            }
-            toastInfoArray.put(index, toastInfoObj);
-        }
+        for(ssize_t index = 0; index < resultArray.arraySize() ; ++index)
+            toastInfoArray.put(index, toastInfo(resultArray[index]));
     }
 
     success = true;

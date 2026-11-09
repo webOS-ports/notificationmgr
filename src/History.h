@@ -55,6 +55,11 @@ public:
     static pbnjson::JValue findQuery(const pbnjson::JValue& where);
     static pbnjson::JValue purgeQuery(const pbnjson::JValue& where);
 
+    /*! One entry of getToastList's reply, from a toast's history record.
+     * Public so the tests can check it without a bus.
+     */
+    static pbnjson::JValue toastInfo(const pbnjson::JValue& record);
+
 protected:
     void onSystemTimeSync(bool sync);
     void onBoot(const std::string &boot);

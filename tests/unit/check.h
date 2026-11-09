@@ -64,7 +64,9 @@ inline std::string show(const char *v) { return v ? show(std::string(v)) : std::
 inline std::string show(bool v) { return v ? "true" : "false"; }
 inline std::string show(long long v) { char b[32]; snprintf(b, sizeof(b), "%lld", v); return b; }
 inline std::string show(int v) { return show(static_cast<long long>(v)); }
-inline std::string show(unsigned long v) { return show(static_cast<long long>(v)); }
+inline std::string show(unsigned long long v) { char b[32]; snprintf(b, sizeof(b), "%llu", v); return b; }
+inline std::string show(unsigned int v) { return show(static_cast<unsigned long long>(v)); }
+inline std::string show(unsigned long v) { return show(static_cast<unsigned long long>(v)); }
 inline std::string show(long v) { return show(static_cast<long long>(v)); }
 
 } // namespace testing
