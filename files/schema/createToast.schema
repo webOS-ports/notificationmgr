@@ -58,6 +58,11 @@
                 }
             }
         },
+        "groupId": {
+            "type": "string",
+            "optional": true,
+            "description": "Toasts of the same source with the same groupId are shown as one entry, with a count"
+        },
         "soundClass": {
             "type": "string",
             "optional": true,
